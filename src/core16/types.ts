@@ -23,6 +23,15 @@ export interface Cpu16State {
   steps: number;
 }
 
+/** Registers that become meaningful during the 386 transition. They are kept
+ * separate from the real-mode interpreter until instruction support arrives. */
+export interface CpuProtectionState {
+  cr0: number;
+  cr3: number;
+  gdtrBase: number;
+  gdtrLimit: number;
+}
+
 export interface StepTrace {
   address: number;
   opcode: number;
@@ -44,6 +53,10 @@ export function u8(value: number): number {
 
 export function u16(value: number): number {
   return value & 0xffff;
+}
+
+export function u32(value: number): number {
+  return value >>> 0;
 }
 
 export function signed8(value: number): number {
@@ -80,4 +93,8 @@ export function createCpu16State(overrides: Partial<Cpu16State> = {}): Cpu16Stat
     steps: 0,
     ...overrides,
   };
+}
+
+export function createCpuProtectionState(overrides: Partial<CpuProtectionState> = {}): CpuProtectionState {
+  return { cr0: 0, cr3: 0, gdtrBase: 0, gdtrLimit: 0, ...overrides };
 }
