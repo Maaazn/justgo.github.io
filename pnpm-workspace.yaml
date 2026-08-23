@@ -1,0 +1,7 @@
+packages:
+  - "."
+
+# JustGo Local Engine needs Vite's esbuild binary. No other dependency build
+# lifecycle is allowed by default.
+allowBuilds:
+  esbuild: true

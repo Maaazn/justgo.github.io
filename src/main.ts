@@ -1,0 +1,179 @@
+/**
+ * JustGo visual philosophy: dark technical control deck, direct asymmetry,
+ * no fake Windows claims. The interface reveals actual local-engine state.
+ */
+import "./styles.css";
+import { LOCAL_IMAGES, getImageById } from "./engine/catalog";
+import type { LocalImageDescriptor, SessionState } from "./engine/contracts";
+import { LocalSessionMachine } from "./engine/session-machine";
+import { V86LocalRuntime } from "./engine/v86-runtime";
+
+const stateLabels: Record<SessionState, string> = {
+  idle: "جاهز",
+  validating: "يتحقق",
+  "loading-runtime": "يحمّل المحرك",
+  "preparing-storage": "يجهّز التخزين",
+  booting: "يقلع محلياً",
+  running: "نشط على جهازك",
+  stopping: "ينهي الجلسة",
+  stopped: "متوقف",
+  failed: "تعذر التشغيل",
+};
+
+const session = new LocalSessionMachine();
+const runtime = new V86LocalRuntime();
+let selectedImageId = "freedos-demo";
+
+const appElement = document.querySelector<HTMLDivElement>("#app");
+if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
+const app: HTMLDivElement = appElement;
+
+function selectedImage(): LocalImageDescriptor {
+  return getImageById(selectedImageId);
+}
+
+function render(): void {
+  const snapshot = session.snapshot;
+  const image = selectedImage();
+  const isRunning = snapshot.state === "running" || snapshot.state === "booting";
+  const bootable = Boolean(image.imageUrl) && image.supportLevel !== "not-bundled";
+
+  app.innerHTML = `
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="JustGo Local Engine">
+          <span class="brand-mark" aria-hidden="true">JG</span>
+          <span><b>JustGo</b><small>Local Engine / α</small></span>
+        </a>
+        <div class="runtime-badge"><span class="pulse"></span> التنفيذ: جهازك، داخل المتصفح</div>
+      </header>
+
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow">BROWSER-NATIVE X86 LAB</p>
+          <h1>شغّل بيئة <em>حقيقية محلياً</em> — لا شاشة ادعاء.</h1>
+          <p class="hero-lede">JustGo يحمّل محرك x86 WebAssembly داخل متصفحك. لا نرسل ضغطاتك إلى خادم جلسات، ولا نسمي بيئة اختبار قديمة Windows 10.</p>
+        </div>
+        <aside class="promise-card">
+          <span class="card-index">01</span>
+          <strong>ما يحدث فعلاً</strong>
+          <p>المعالج الافتراضي، الذاكرة، الشاشة والمدخلات تعمل في علامة تبويبك. الأصول الثقيلة تُسحب عند الحاجة فقط.</p>
+        </aside>
+      </section>
+
+      <section class="control-grid" aria-label="لوحة إطلاق البيئة المحلية">
+        <aside class="control-rail">
+          <div class="section-label"><span>CATALOG</span><b>بيئات التشغيل</b></div>
+          <div class="image-list">
+            ${LOCAL_IMAGES.map((candidate) => `
+              <button class="image-option ${candidate.id === image.id ? "is-selected" : ""}" data-image-id="${candidate.id}" type="button" aria-pressed="${candidate.id === image.id}">
+                <span class="image-dot ${candidate.supportLevel}"></span>
+                <span class="image-title">${candidate.label}</span>
+                <small>${candidate.supportLevel === "verified-demo" ? "جاهز للاختبار" : candidate.supportLevel === "experimental" ? "تجريبي" : "غير مرفق"}</small>
+              </button>
+            `).join("")}
+          </div>
+          <div class="terms-note"><b>حدود صريحة:</b> FreeDOS هنا اختبار للمحرك فقط. ReactOS مفتوح المصدر لكنه Alpha. Windows 10 غير مدعوم أو مرفق حالياً.</div>
+        </aside>
+
+        <section class="workspace">
+          <div class="workspace-head">
+            <div>
+              <p class="eyebrow">LOCAL SESSION / ${snapshot.id.slice(-8).toUpperCase()}</p>
+              <h2>${image.label}</h2>
+            </div>
+            <div class="state-chip state-${snapshot.state}"><span></span>${stateLabels[snapshot.state]}</div>
+          </div>
+
+          <div class="stage-frame">
+            <div id="screen-mount" class="screen-mount ${isRunning ? "is-running" : ""}">
+              ${isRunning ? "" : `<div class="stage-idle"><span class="terminal-cursor">_</span><b>${bootable ? "المحرك في انتظار الإطلاق" : "لا توجد صورة إقلاع موثقة لهذه البيئة"}</b><p>${bootable ? "اضغط ابدأ التشغيل لتهيئة المعالج الافتراضي داخل متصفحك." : "اختيارك محفوظ، لكننا لن نقلع أصلاً غير مختبر."}</p></div>`}
+            </div>
+            <div class="stage-grid" aria-hidden="true"></div>
+          </div>
+
+          <div class="session-console" aria-live="polite">
+            <span>ENGINE STATUS</span>
+            <p>${snapshot.message}</p>
+          </div>
+
+          <div class="workspace-actions">
+            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option></select></label>
+            <div class="action-group">
+              <button class="button secondary" id="stop-session" type="button" ${isRunning ? "" : "disabled"}>إنهاء وتنظيف</button>
+              <button class="button primary" id="launch-session" type="button" ${bootable && !isRunning ? "" : "disabled"}>ابدأ التشغيل <span aria-hidden="true">↙</span></button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="evidence-strip">
+        <article><span>01</span><p>لا تستخدم هذه النسخة شبكة للضيف؛ الإقلاع المعروض يبقى بيئة محلية مقيدة.</p></article>
+        <article><span>02</span><p>صورة الاختبار ليست ضمن Git. الكتالوج يحتفظ بالمصدر وحدود الدعم فقط.</p></article>
+        <article><span>03</span><p>يمكن تبديل موصل المحرك لاحقاً، لكن أي دعم Windows 10 يحتاج اختباراً مستقلاً ومشروعاً.</p></article>
+      </section>
+    </main>
+  `;
+
+  bindEvents();
+}
+
+function announce(next: SessionState, message: string, imageId?: string): void {
+  session.transition(next, message, imageId);
+  render();
+}
+
+async function launch(): Promise<void> {
+  const image = selectedImage();
+  const memorySelect = document.querySelector<HTMLSelectElement>("#memory-select");
+  const mount = document.querySelector<HTMLElement>("#screen-mount");
+  if (!memorySelect || !mount) return;
+
+  try {
+    announce("validating", "يتحقق JustGo من مصدر البيئة وحدودها المحلية.", image.id);
+    announce("loading-runtime", "يحمّل محرك x86 WebAssembly داخل هذه العلامة.");
+    announce("preparing-storage", "يجهّز مساحة الذاكرة والأصل القابل للتحميل عند الطلب.");
+    announce("booting", "يقلع FreeDOS داخل متصفحك. قد يستغرق التحضير الأول وقتاً قصيراً.");
+    const liveMount = document.querySelector<HTMLElement>("#screen-mount");
+    if (!liveMount) throw new Error("تعذر تهيئة شاشة المحرك.");
+    await runtime.boot(
+      {
+        image,
+        viewport: { width: 1024, height: 768, memoryMiB: Number(memorySelect.value) },
+        persistState: false,
+      },
+      liveMount,
+    );
+    announce("running", "المحرك المحلي جاهز. انقر داخل الشاشة لالتقاط لوحة المفاتيح.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "حدث خطأ غير معروف أثناء تهيئة المحرك.";
+    announce("failed", message);
+  }
+}
+
+async function stop(): Promise<void> {
+  try {
+    announce("stopping", "ينهي JustGo المحرك المحلي ويحرر الذاكرة.");
+    await runtime.stop();
+    session.transition("stopped", "انتهت الجلسة المحلية. يمكنك تشغيل بيئة جديدة.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تنظيف الجلسة المحلية.";
+    session.transition("failed", message);
+  }
+  render();
+}
+
+function bindEvents(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-image-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (session.snapshot.state === "running" || session.snapshot.state === "booting") return;
+      selectedImageId = button.dataset.imageId ?? selectedImageId;
+      session.reset("تم اختيار بيئة جديدة؛ لم تُحمّل أي صورة بعد.");
+      render();
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#launch-session")?.addEventListener("click", () => void launch());
+  document.querySelector<HTMLButtonElement>("#stop-session")?.addEventListener("click", () => void stop());
+}
+
+render();

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+*.iso
+*.img
+*.qcow2
+*.vhd
+*.vhdx
+*.ova
+*.raw
+.env
+.env.*
+!.env.example

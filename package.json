@@ -1,0 +1,24 @@
+{
+  "name": "justgo-local-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JustGo Local Engine — browser-native x86 workspace experiments",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "v86": "0.5.441"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4"
+  },
+  "packageManager": "pnpm@11.21.0"
+}
