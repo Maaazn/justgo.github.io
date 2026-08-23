@@ -115,6 +115,16 @@ describe("JustGo Core-16 devices", () => {
     expect(ports.in8(0x60)).toBe(0x30);
   });
 
+  it("enables PS/2 mouse streaming through controller command and emits a packet", () => {
+    const ports = new DevicePortBus();
+    ports.out8(0x64, 0xd4);
+    ports.out8(0x60, 0xf4);
+    expect(ports.in8(0x60)).toBe(0xfa);
+    ports.enqueueMouseMotion(4, -2, 1);
+    expect(ports.in8(0x64) & 0x20).toBe(0x20);
+    expect([ports.in8(0x60), ports.in8(0x60), ports.in8(0x60)]).toEqual([0x29, 0x04, 0xfe]);
+  });
+
   it("maps a read-only firmware ROM and exposes a deterministic x86 reset vector", () => {
     const firmware = createResetVectorRom(0x1234);
     const bus = new MappedMemory(new LinearMemory(), [firmware]);

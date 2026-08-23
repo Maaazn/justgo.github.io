@@ -221,6 +221,10 @@ export class DevicePortBus implements PortBus {
     this.ps2.enqueueScanCode(code);
   }
 
+  enqueueMouseMotion(deltaX: number, deltaY: number, buttons: number): void {
+    this.ps2.enqueueMouseMotion({ deltaX, deltaY, buttons });
+  }
+
   in8(port: number): number {
     const normalizedPort = port & 0xffff;
     if (normalizedPort === 0x60) return this.ps2.readData();
