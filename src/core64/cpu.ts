@@ -1,7 +1,14 @@
 import { StepLimitError, UnsupportedOpcodeError } from "../core16/cpu";
 import { LongModeAddressSpace } from "./address-space";
+import { add64, sub64, type Alu64Result } from "./alu";
 import { decodeRex, register64, signExtend32 } from "./decoder";
+import { decodeModRm64 } from "./modrm";
 import { createCpu64State, type Cpu64State, type Register64Name, u64, write32ZeroExtended } from "./registers";
+
+const FLAG_CARRY = 1n << 0n;
+const FLAG_ZERO = 1n << 6n;
+const FLAG_SIGN = 1n << 7n;
+const FLAG_OVERFLOW = 1n << 11n;
 
 export interface Core64Trace {
   readonly address: bigint;
@@ -61,14 +68,27 @@ export class Core64 {
         return "HLT";
       case 0x05: {
         const immediate = this.fetch32();
-        this.state.rax = rex?.w ? u64(this.state.rax + signExtend32(immediate)) : write32ZeroExtended(BigInt((Number(this.state.rax & 0xffff_ffffn) + immediate) >>> 0));
-        return `ADD RAX, imm${rex?.w ? "32" : "32"}`;
+        if (rex?.w) {
+          const result = add64(this.state.rax, signExtend32(immediate));
+          this.state.rax = result.result;
+          this.applyAluFlags(result);
+        } else this.state.rax = write32ZeroExtended(BigInt((Number(this.state.rax & 0xffff_ffffn) + immediate) >>> 0));
+        return "ADD RAX, imm32";
       }
       case 0x2d: {
         const immediate = this.fetch32();
-        this.state.rax = rex?.w ? u64(this.state.rax - signExtend32(immediate)) : write32ZeroExtended(BigInt((Number(this.state.rax & 0xffff_ffffn) - immediate) >>> 0));
-        return `SUB RAX, imm${rex?.w ? "32" : "32"}`;
+        if (rex?.w) {
+          const result = sub64(this.state.rax, signExtend32(immediate));
+          this.state.rax = result.result;
+          this.applyAluFlags(result);
+        } else this.state.rax = write32ZeroExtended(BigInt((Number(this.state.rax & 0xffff_ffffn) - immediate) >>> 0));
+        return "SUB RAX, imm32";
       }
+      case 0x89: return this.executeRegisterMove(rex, "rm-reg");
+      case 0x8b: return this.executeRegisterMove(rex, "reg-rm");
+      case 0x01: return this.executeRegisterAlu(rex, "add");
+      case 0x29: return this.executeRegisterAlu(rex, "sub");
+      case 0x39: return this.executeRegisterAlu(rex, "cmp");
       default:
         throw new UnsupportedOpcodeError(opcode, Number(this.state.rip - 1n));
     }
@@ -78,4 +98,49 @@ export class Core64 {
   private fetch32(): number { let value = 0; for (let byte = 0; byte < 4; byte += 1) value |= this.fetch8() << (byte * 8); return value >>> 0; }
   private fetch64(): bigint { let value = 0n; for (let byte = 0; byte < 8; byte += 1) value |= BigInt(this.fetch8()) << BigInt(byte * 8); return value; }
   private setRegister(register: Register64Name, value: bigint): void { this.state[register] = u64(value); }
+  private getRegister(register: Register64Name): bigint { return this.state[register]; }
+
+  private writeOperand(register: Register64Name, value: bigint, width64: boolean): void {
+    this.setRegister(register, width64 ? value : write32ZeroExtended(value));
+  }
+
+  private executeRegisterMove(rex: ReturnType<typeof decodeRex>, direction: "rm-reg" | "reg-rm"): string {
+    const operand = decodeModRm64(this.fetch8(), rex, direction === "rm-reg" ? 0x89 : 0x8b);
+    const destination = direction === "rm-reg" ? operand.rm : operand.reg;
+    const source = direction === "rm-reg" ? operand.reg : operand.rm;
+    this.writeOperand(destination, this.getRegister(source), rex?.w ?? false);
+    return `MOV ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+  }
+
+  private executeRegisterAlu(rex: ReturnType<typeof decodeRex>, operation: "add" | "sub" | "cmp"): string {
+    const opcode = operation === "add" ? 0x01 : operation === "sub" ? 0x29 : 0x39;
+    const operand = decodeModRm64(this.fetch8(), rex, opcode);
+    const left = this.getRegister(operand.rm);
+    const right = this.getRegister(operand.reg);
+    const width64 = rex?.w ?? false;
+    if (width64) {
+      const result = operation === "add" ? add64(left, right) : sub64(left, right);
+      this.applyAluFlags(result);
+      if (operation !== "cmp") this.setRegister(operand.rm, result.result);
+    } else {
+      const left32 = Number(left & 0xffff_ffffn) >>> 0;
+      const right32 = Number(right & 0xffff_ffffn) >>> 0;
+      const result = operation === "add" ? (left32 + right32) >>> 0 : (left32 - right32) >>> 0;
+      if (operation !== "cmp") this.writeOperand(operand.rm, BigInt(result), false);
+      this.setFlag(FLAG_ZERO, result === 0);
+      this.setFlag(FLAG_SIGN, (result & 0x8000_0000) !== 0);
+    }
+    return `${operation.toUpperCase()} ${operand.rm.toUpperCase()}, ${operand.reg.toUpperCase()}`;
+  }
+
+  private applyAluFlags(result: Alu64Result): void {
+    this.setFlag(FLAG_CARRY, result.carry);
+    this.setFlag(FLAG_ZERO, result.zero);
+    this.setFlag(FLAG_SIGN, result.sign);
+    this.setFlag(FLAG_OVERFLOW, result.overflow);
+  }
+
+  private setFlag(flag: bigint, enabled: boolean): void {
+    this.state.rflags = enabled ? this.state.rflags | flag : this.state.rflags & ~flag;
+  }
 }

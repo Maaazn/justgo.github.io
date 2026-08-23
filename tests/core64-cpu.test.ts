@@ -35,4 +35,18 @@ describe("JustGo Core-64 narrow interpreter", () => {
     cpu.run();
     expect(cpu.state.rax).toBe(0x1234_5678n);
   });
+
+  it("executes REX-extended register moves and register arithmetic", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x49, 0xb8, 0x10, 0, 0, 0, 0, 0, 0, 0,
+      0x49, 0xb9, 0x05, 0, 0, 0, 0, 0, 0, 0,
+      0x4d, 0x01, 0xc8,
+      0x4d, 0x89, 0xc2,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.r8).toBe(0x15n);
+    expect(cpu.state.r10).toBe(0x15n);
+  });
 });
