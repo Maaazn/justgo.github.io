@@ -12,6 +12,9 @@ export interface RgbaPixel {
  * separated: UI code can consume snapshot() without owning guest memory.
  */
 export class LongModeFramebuffer {
+  private dirty = true;
+  private revision = 0;
+
   constructor(
     private readonly addressSpace: LongModeAddressSpace,
     readonly baseAddress: bigint,
@@ -27,6 +30,8 @@ export class LongModeFramebuffer {
     this.addressSpace.write8(address + 1n, pixel.green);
     this.addressSpace.write8(address + 2n, pixel.blue);
     this.addressSpace.write8(address + 3n, pixel.alpha);
+    this.dirty = true;
+    this.revision += 1;
   }
 
   readPixel(x: number, y: number): RgbaPixel {
@@ -50,6 +55,13 @@ export class LongModeFramebuffer {
       }
     }
     return pixels;
+  }
+
+  /** Renderer may clear this marker after a successful presentation only. */
+  takeDirty(): { readonly dirty: boolean; readonly revision: number } {
+    const state = { dirty: this.dirty, revision: this.revision };
+    this.dirty = false;
+    return state;
   }
 
   private pixelAddress(x: number, y: number): bigint {

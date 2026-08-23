@@ -3,7 +3,9 @@ import { Core16 } from "../src/core16/cpu";
 import { ProgrammableIntervalTimer, DevicePortBus } from "../src/core16/devices";
 import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
+import { Ps2Controller } from "../src/core16/ps2";
 import { BootTrace } from "../src/lab/boot-trace";
+import { DeterministicPs2Input } from "../src/lab/deterministic-input";
 import { DeterministicScheduler, type ClockedDevice, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
 
 class FakeCpu implements ScheduledCpu {
@@ -60,5 +62,14 @@ describe("JustGo deterministic scheduler", () => {
     const second = runCore();
     expect(first.equals(second)).toBe(true);
     expect(first.snapshot().some((event) => event.source === "pit" && event.data.generatedInterrupts === 1)).toBe(true);
+  });
+
+  it("records queued PS/2 input before CPU execution in the same deterministic slot", () => {
+    const cpu: ScheduledCpu = { state: { halted: false, steps: 0 }, step: () => ({ address: 0, opcode: 0x90, mnemonic: "NOP" }) };
+    const trace = new BootTrace();
+    const input = new DeterministicPs2Input(new Ps2Controller());
+    input.enqueue({ kind: "keyboard", scanCode: 0x1c });
+    new DeterministicScheduler(cpu, { advanceOscillatorTicks: () => 0 }, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 0 }, { input }).runTick();
+    expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual(["scheduler:tick.begin", "ps2:input", "cpu:instruction", "pit:advance", "video:frame.ready", "scheduler:tick.end"]);
   });
 });
