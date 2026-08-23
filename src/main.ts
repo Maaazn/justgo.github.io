@@ -23,6 +23,7 @@ const stateLabels: Record<SessionState, string> = {
 const session = new LocalSessionMachine();
 const runtime = new V86LocalRuntime();
 let selectedImageId = "freedos-demo";
+let localWindowsKey = "";
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -30,6 +31,10 @@ const app: HTMLDivElement = appElement;
 
 function selectedImage(): LocalImageDescriptor {
   return getImageById(selectedImageId);
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
 }
 
 function render(): void {
@@ -99,6 +104,10 @@ function render(): void {
 
           <div class="workspace-actions">
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option></select></label>
+            <label class="key-field">مفتاح Windows (اختياري)
+              <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
+              <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
+            </label>
             <div class="action-group">
               <button class="button secondary" id="stop-session" type="button" ${isRunning ? "" : "disabled"}>إنهاء وتنظيف</button>
               <button class="button primary" id="launch-session" type="button" ${bootable && !isRunning ? "" : "disabled"}>ابدأ التشغيل <span aria-hidden="true">↙</span></button>
@@ -160,6 +169,7 @@ async function stop(): Promise<void> {
     const message = error instanceof Error ? error.message : "تعذر تنظيف الجلسة المحلية.";
     session.transition("failed", message);
   }
+  localWindowsKey = "";
   render();
 }
 
@@ -174,6 +184,9 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLButtonElement>("#launch-session")?.addEventListener("click", () => void launch());
   document.querySelector<HTMLButtonElement>("#stop-session")?.addEventListener("click", () => void stop());
+  document.querySelector<HTMLInputElement>("#windows-key")?.addEventListener("input", (event) => {
+    localWindowsKey = (event.currentTarget as HTMLInputElement).value;
+  });
 }
 
 render();

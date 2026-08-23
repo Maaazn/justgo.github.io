@@ -11,6 +11,7 @@ export interface MemoryBus {
 }
 
 const ADDRESS_MASK = 0xfffff;
+export const CORE16_PAGE_SIZE = 4096;
 
 export class LinearMemory implements MemoryBus {
   private readonly bytes = new Uint8Array(ADDRESS_MASK + 1);
@@ -39,5 +40,30 @@ export class LinearMemory implements MemoryBus {
 
   clear(): void {
     this.bytes.fill(0);
+  }
+}
+
+/**
+ * Core-16 JIT design: every page has an epoch. A translated block keeps the
+ * epoch it observed and is never reused after a write to its code page.
+ */
+export class VersionedMemory extends LinearMemory {
+  private readonly pageEpochs = new Uint32Array((ADDRESS_MASK + 1) / CORE16_PAGE_SIZE);
+
+  override write8(address: number, value: number): void {
+    super.write8(address, value);
+    const page = (address & ADDRESS_MASK) >>> 12;
+    this.pageEpochs[page] = (this.pageEpochs[page] + 1) >>> 0;
+  }
+
+  override clear(): void {
+    super.clear();
+    for (let index = 0; index < this.pageEpochs.length; index += 1) {
+      this.pageEpochs[index] = (this.pageEpochs[index] + 1) >>> 0;
+    }
+  }
+
+  pageEpoch(address: number): number {
+    return this.pageEpochs[(address & ADDRESS_MASK) >>> 12] ?? 0;
   }
 }

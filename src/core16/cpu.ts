@@ -82,6 +82,22 @@ export class Core16 {
     return { address, opcode, mnemonic };
   }
 
+  /**
+   * Used only by the block translator after it has restored the instruction
+   * pointer to the byte immediately after a prefetched opcode.
+   */
+  executePrefetchedOpcode(opcode: number): string {
+    return this.execute(opcode);
+  }
+
+  canUseTranslatedBlock(): boolean {
+    return !this.state.halted && !this.hasFlag(FLAG_INTERRUPT);
+  }
+
+  noteTranslatedInstruction(): void {
+    this.state.steps += 1;
+  }
+
   private execute(opcode: number): string {
     if (opcode >= 0xb8 && opcode <= 0xbf) {
       const register = REGISTERS[opcode - 0xb8];
