@@ -24,6 +24,8 @@ const session = new LocalSessionMachine();
 const runtime = new V86LocalRuntime();
 let selectedImageId = "freedos-demo";
 let localWindowsKey = "";
+let selectedLocalFile: File | undefined;
+let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -37,11 +39,22 @@ function escapeAttribute(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
 }
 
+function escapeText(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+function selectedLaunchImage(): LocalImageDescriptor {
+  const image = selectedImage();
+  if (image.source !== "user-provided" || !selectedLocalFile) return image;
+  return { ...image, format: selectedLocalFormat, localFile: selectedLocalFile, label: `${image.label} — ${selectedLocalFile.name}` };
+}
+
 function render(): void {
   const snapshot = session.snapshot;
   const image = selectedImage();
   const isRunning = snapshot.state === "running" || snapshot.state === "booting";
-  const bootable = Boolean(image.imageUrl) && image.supportLevel !== "not-bundled";
+  const bootable = (Boolean(image.imageUrl) || (image.source === "user-provided" && Boolean(selectedLocalFile))) && image.supportLevel !== "not-bundled";
+  const inputDetail = runtime.inputProfile?.detail ?? "سيُكتشف أسلوب الماوس أو اللمس عند تشغيل الشاشة.";
 
   app.innerHTML = `
     <main class="app-shell">
@@ -78,6 +91,13 @@ function render(): void {
               </button>
             `).join("")}
           </div>
+          ${image.source === "user-provided" ? `
+            <label class="local-media-field">صورة محلية (ISO أو IMG)
+              <input id="local-media" type="file" accept=".iso,.img,.raw,application/x-cd-image" ${isRunning ? "disabled" : ""}>
+              <select id="local-format" ${isRunning ? "disabled" : ""}><option value="hard-disk" ${selectedLocalFormat === "hard-disk" ? "selected" : ""}>قرص صلب / IMG</option><option value="cdrom" ${selectedLocalFormat === "cdrom" ? "selected" : ""}>قرص مدمج / ISO</option></select>
+              <small>${selectedLocalFile ? `تم اختيار: ${escapeText(selectedLocalFile.name)} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
+            </label>
+          ` : ""}
           <div class="terms-note"><b>حدود صريحة:</b> FreeDOS هنا اختبار للمحرك فقط. ReactOS مفتوح المصدر لكنه Alpha. Windows 10 غير مدعوم أو مرفق حالياً.</div>
         </aside>
 
@@ -101,6 +121,7 @@ function render(): void {
             <span>ENGINE STATUS</span>
             <p>${snapshot.message}</p>
           </div>
+          <div class="input-console"><span>INPUT MODE</span><p>${inputDetail}</p></div>
 
           <div class="workspace-actions">
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option></select></label>
@@ -133,7 +154,7 @@ function announce(next: SessionState, message: string, imageId?: string): void {
 }
 
 async function launch(): Promise<void> {
-  const image = selectedImage();
+  const image = selectedLaunchImage();
   const memorySelect = document.querySelector<HTMLSelectElement>("#memory-select");
   const mount = document.querySelector<HTMLElement>("#screen-mount");
   if (!memorySelect || !mount) return;
@@ -142,7 +163,7 @@ async function launch(): Promise<void> {
     announce("validating", "يتحقق JustGo من مصدر البيئة وحدودها المحلية.", image.id);
     announce("loading-runtime", "يحمّل محرك x86 WebAssembly داخل هذه العلامة.");
     announce("preparing-storage", "يجهّز مساحة الذاكرة والأصل القابل للتحميل عند الطلب.");
-    announce("booting", "يقلع FreeDOS داخل متصفحك. قد يستغرق التحضير الأول وقتاً قصيراً.");
+    announce("booting", image.source === "user-provided" ? "يقرأ JustGo الملف محلياً داخل الذاكرة ثم يحاول الإقلاع. لا يُرفع الملف." : "يقلع FreeDOS داخل متصفحك. قد يستغرق التحضير الأول وقتاً قصيراً.");
     const liveMount = document.querySelector<HTMLElement>("#screen-mount");
     if (!liveMount) throw new Error("تعذر تهيئة شاشة المحرك.");
     await runtime.boot(
@@ -153,7 +174,7 @@ async function launch(): Promise<void> {
       },
       liveMount,
     );
-    announce("running", "المحرك المحلي جاهز. انقر داخل الشاشة لالتقاط لوحة المفاتيح.");
+    announce("running", `المحرك المحلي جاهز. ${runtime.inputProfile?.detail ?? "انقر داخل الشاشة لإرسال الإدخال."}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "حدث خطأ غير معروف أثناء تهيئة المحرك.";
     announce("failed", message);
@@ -186,6 +207,16 @@ function bindEvents(): void {
   document.querySelector<HTMLButtonElement>("#stop-session")?.addEventListener("click", () => void stop());
   document.querySelector<HTMLInputElement>("#windows-key")?.addEventListener("input", (event) => {
     localWindowsKey = (event.currentTarget as HTMLInputElement).value;
+  });
+  document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {
+    selectedLocalFile = (event.currentTarget as HTMLInputElement).files?.[0];
+    session.reset(selectedLocalFile ? "تم اختيار وسيط محلي؛ لا يغادر جهازك قبل أو بعد الإقلاع." : "لم يُختَر ملف محلي.");
+    render();
+  });
+  document.querySelector<HTMLSelectElement>("#local-format")?.addEventListener("change", (event) => {
+    selectedLocalFormat = (event.currentTarget as HTMLSelectElement).value === "cdrom" ? "cdrom" : "hard-disk";
+    session.reset("تم تعديل نوع الوسيط المحلي؛ لم يُقرأ الملف بعد.");
+    render();
   });
 }
 

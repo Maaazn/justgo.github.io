@@ -2,9 +2,10 @@
  * JustGo Local Engine design: this bridge starts an actual v86 x86 runtime
  * inside the visitor's browser. It never labels a legacy image as Windows 10.
  */
-import { V86 } from "v86";
+import { V86, type V86Image } from "v86";
 import wasmUrl from "v86/build/v86.wasm?url";
 import type { LocalLaunchRequest, RuntimeBridge } from "./contracts";
+import { configureInputSurface, type InputProfile } from "./input-control";
 
 const V86_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/seabios.bin";
 const V86_VGA_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/vgabios.bin";
@@ -27,23 +28,29 @@ function prepareScreen(mount: HTMLElement): HTMLElement {
   return screen;
 }
 
-function requireBootableImage(request: LocalLaunchRequest): string {
+function requireBootableImage(request: LocalLaunchRequest): LocalLaunchRequest["image"] {
+  if (request.image.localFile) return request.image;
   if (!request.image.imageUrl) {
     throw new Error("هذه البيئة لم تُرفق لها صورة إقلاع تم التحقق منها بعد.");
   }
   if (request.image.supportLevel === "not-bundled") {
     throw new Error("لا يمكن تشغيل بيئة غير مختبرة أو غير مرفقة من كتالوج JustGo.");
   }
-  return request.image.imageUrl;
+  return request.image;
 }
 
 export class V86LocalRuntime implements RuntimeBridge {
   private emulator?: V86;
+  inputProfile?: InputProfile;
 
   async boot(request: LocalLaunchRequest, mount: HTMLElement): Promise<void> {
     await this.stop();
-    const imageUrl = requireBootableImage(request);
+    const image = requireBootableImage(request);
     const screen = prepareScreen(mount);
+    this.inputProfile = configureInputSurface(screen);
+    const media: V86Image = image.localFile
+      ? { buffer: await image.localFile.arrayBuffer() }
+      : { url: image.imageUrl! };
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -59,7 +66,7 @@ export class V86LocalRuntime implements RuntimeBridge {
         vga_memory_size: 8 * 1024 * 1024,
         bios: { url: V86_BIOS_URL },
         vga_bios: { url: V86_VGA_BIOS_URL },
-        hda: { url: imageUrl },
+        ...(image.format === "cdrom" ? { cdrom: media } : { hda: media }),
         screen: {
           container: screen,
           use_graphical_text: true,
@@ -88,6 +95,7 @@ export class V86LocalRuntime implements RuntimeBridge {
     if (!this.emulator) return;
     const emulator = this.emulator;
     this.emulator = undefined;
+    this.inputProfile = undefined;
     await emulator.stop();
     await emulator.destroy();
   }

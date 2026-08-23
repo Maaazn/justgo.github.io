@@ -18,10 +18,12 @@ export type SessionState =
 export interface LocalImageDescriptor {
   id: string;
   label: string;
-  family: "freedos" | "reactos" | "custom";
+  family: "freedos" | "reactos" | "kolibrios" | "alpine" | "custom";
   format: "hard-disk" | "cdrom";
-  source: "external-demo" | "user-provided" | "future-hosted";
+  source: "external-demo" | "open-source-catalog" | "user-provided" | "future-hosted";
   imageUrl?: string;
+  /** Browser File chosen by the visitor. It is not uploaded or persisted. */
+  localFile?: File;
   terms: string;
   supportLevel: "verified-demo" | "experimental" | "not-bundled";
 }
