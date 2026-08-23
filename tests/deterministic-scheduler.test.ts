@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Core16 } from "../src/core16/cpu";
+import { ProgrammableIntervalTimer, DevicePortBus } from "../src/core16/devices";
+import { InterruptQueue } from "../src/core16/interrupts";
+import { LinearMemory } from "../src/core16/memory";
 import { BootTrace } from "../src/lab/boot-trace";
 import { DeterministicScheduler, type ClockedDevice, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
 
@@ -37,5 +41,24 @@ describe("JustGo deterministic scheduler", () => {
     const trace = runScenario().snapshot();
     const firstTick = trace.filter((event) => event.tick === 0).map((event) => `${event.source}:${event.kind}`);
     expect(firstTick).toEqual(["scheduler:tick.begin", "cpu:instruction", "cpu:instruction", "cpu:instruction", "pit:advance", "video:frame.ready", "scheduler:tick.end"]);
+  });
+
+  it("replays an actual Core-16 and PIT schedule with the same boot trace", () => {
+    const runCore = (): BootTrace => {
+      const memory = new LinearMemory();
+      const interrupts = new InterruptQueue();
+      const cpu = new Core16(memory, new DevicePortBus(), interrupts);
+      cpu.loadProgram(new Uint8Array([0xfb, 0x90, 0x90, 0xf4]));
+      const pit = new ProgrammableIntervalTimer(interrupts);
+      pit.configureDivisor(2);
+      const trace = new BootTrace();
+      const scheduler = new DeterministicScheduler(cpu, pit, trace, { instructionsPerTick: 2, oscillatorTicksPerInstruction: 1 });
+      scheduler.runTick(); scheduler.runTick(); scheduler.runTick();
+      return trace;
+    };
+    const first = runCore();
+    const second = runCore();
+    expect(first.equals(second)).toBe(true);
+    expect(first.snapshot().some((event) => event.source === "pit" && event.data.generatedInterrupts === 1)).toBe(true);
   });
 });
