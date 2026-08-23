@@ -72,6 +72,47 @@ export class TextModeVga implements MemoryMappedDevice {
   }
 }
 
+/**
+ * A linear RGBA framebuffer mapped into guest memory. It is intentionally a
+ * small graphics foundation, not a claim of a complete VGA register model.
+ */
+export class FrameBufferVga implements MemoryMappedDevice {
+  readonly start = 0xa0000;
+  readonly end: number;
+  private readonly bytes: Uint8Array;
+
+  constructor(readonly width = 320, readonly height = 200) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) throw new Error("أبعاد framebuffer غير صالحة.");
+    const byteLength = width * height * 4;
+    if (byteLength > 0x40000) throw new Error("حجم framebuffer يتجاوز نافذة الفيديو المتاحة في Core-16.");
+    this.bytes = new Uint8Array(byteLength);
+    this.end = this.start + byteLength - 1;
+  }
+
+  read8(offset: number): number { return this.bytes[offset] ?? 0; }
+  write8(offset: number, value: number): void {
+    if (offset < 0 || offset >= this.bytes.length) throw new Error("كتابة framebuffer خارج النطاق.");
+    this.bytes[offset] = u8(value);
+  }
+
+  setPixel(x: number, y: number, rgba: readonly [number, number, number, number]): void {
+    const offset = this.pixelOffset(x, y);
+    rgba.forEach((channel, index) => { this.bytes[offset + index] = u8(channel); });
+  }
+
+  pixel(x: number, y: number): readonly [number, number, number, number] {
+    const offset = this.pixelOffset(x, y);
+    return [this.bytes[offset] ?? 0, this.bytes[offset + 1] ?? 0, this.bytes[offset + 2] ?? 0, this.bytes[offset + 3] ?? 0];
+  }
+
+  frame(): Uint8Array { return this.bytes.slice(); }
+
+  private pixelOffset(x: number, y: number): number {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= this.width || y >= this.height) throw new Error("بكسل framebuffer خارج النطاق.");
+    return (y * this.width + x) * 4;
+  }
+}
+
 /** Read-only firmware window for the 0xF0000–0xFFFFF system ROM region. */
 export class FirmwareRom implements MemoryMappedDevice {
   readonly start: number;
@@ -163,28 +204,45 @@ export class SectorDisk {
   }
 }
 
+export interface PortDiagnostic {
+  readonly direction: "in" | "out";
+  readonly port: number;
+  readonly value?: number;
+}
+
 export class DevicePortBus implements PortBus {
   readonly debugOutput: number[] = [];
   readonly ps2 = new Ps2Controller();
+  readonly unsupportedPorts: PortDiagnostic[] = [];
+
+  constructor(private readonly strictUnsupportedPorts = false) {}
 
   enqueueKeyboardScanCode(code: number): void {
     this.ps2.enqueueScanCode(code);
   }
 
   in8(port: number): number {
-    if ((port & 0xffff) === 0x60) return this.ps2.readData();
-    if ((port & 0xffff) === 0x64) return this.ps2.readStatus();
+    const normalizedPort = port & 0xffff;
+    if (normalizedPort === 0x60) return this.ps2.readData();
+    if (normalizedPort === 0x64) return this.ps2.readStatus();
+    this.reportUnsupported({ direction: "in", port: normalizedPort });
     return 0xff;
   }
 
   out8(port: number, value: number): void {
     const normalizedPort = port & 0xffff;
-    if (normalizedPort === 0xe9) this.debugOutput.push(u8(value));
-    if (normalizedPort === 0x64) this.ps2.writeControllerCommand(value);
-    if (normalizedPort === 0x60) this.ps2.writeData(value);
+    if (normalizedPort === 0xe9) { this.debugOutput.push(u8(value)); return; }
+    if (normalizedPort === 0x64) { this.ps2.writeControllerCommand(value); return; }
+    if (normalizedPort === 0x60) { this.ps2.writeData(value); return; }
+    this.reportUnsupported({ direction: "out", port: normalizedPort, value: u8(value) });
   }
 
   debugText(): string {
     return String.fromCharCode(...this.debugOutput);
+  }
+
+  private reportUnsupported(event: PortDiagnostic): void {
+    this.unsupportedPorts.push(event);
+    if (this.strictUnsupportedPorts) throw new Error(`منفذ I/O غير مدعوم: 0x${event.port.toString(16)}.`);
   }
 }

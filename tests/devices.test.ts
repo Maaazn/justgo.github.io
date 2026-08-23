@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Core16 } from "../src/core16/cpu";
-import { createResetVectorRom, DevicePortBus, FirmwareRom, MappedMemory, ProgrammableIntervalTimer, SectorDisk, TextModeVga } from "../src/core16/devices";
+import { createResetVectorRom, DevicePortBus, FirmwareRom, FrameBufferVga, MappedMemory, ProgrammableIntervalTimer, SectorDisk, TextModeVga } from "../src/core16/devices";
 import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
 import { FLAG_INTERRUPT } from "../src/core16/types";
@@ -12,6 +12,18 @@ describe("JustGo Core-16 devices", () => {
     memory.write8(0xb8000, "J".charCodeAt(0));
     memory.write8(0xb8001, 0x0a);
     expect(vga.line(0).startsWith("J")).toBe(true);
+  });
+
+  it("maps RGBA framebuffer bytes and exposes pixels without a DOM surface", () => {
+    const framebuffer = new FrameBufferVga(2, 2);
+    const memory = new MappedMemory(new LinearMemory(), [framebuffer]);
+    memory.write8(0xa0000, 0x11);
+    memory.write8(0xa0001, 0x22);
+    memory.write8(0xa0002, 0x33);
+    memory.write8(0xa0003, 0xff);
+    expect(framebuffer.pixel(0, 0)).toEqual([0x11, 0x22, 0x33, 0xff]);
+    framebuffer.setPixel(1, 1, [1, 2, 3, 4]);
+    expect(framebuffer.frame()).toHaveLength(16);
   });
 
   it("preserves fixed-size sector disk writes", () => {
@@ -76,6 +88,16 @@ describe("JustGo Core-16 devices", () => {
     core.loadProgram(Uint8Array.from([0xe4, 0x60, 0xe6, 0xe9, 0xf4]));
     core.run();
     expect(ports.debugText()).toBe(String.fromCharCode(0x1e));
+  });
+
+  it("records unsupported port reads and writes without stopping the guest by default", () => {
+    const ports = new DevicePortBus();
+    expect(ports.in8(0x3f8)).toBe(0xff);
+    ports.out8(0x3f8, 0x41);
+    expect(ports.unsupportedPorts).toEqual([
+      { direction: "in", port: 0x3f8 },
+      { direction: "out", port: 0x3f8, value: 0x41 },
+    ]);
   });
 
   it("models PS/2 controller status, command byte and keyboard enable state", () => {
