@@ -1,0 +1,38 @@
+import { describe, expect, it } from "vitest";
+import { LinearMemory } from "../src/core16/memory";
+import { LongModeAddressSpace } from "../src/core64/address-space";
+import { createLongModeControlState } from "../src/core64/control";
+import { Core64 } from "../src/core64/cpu";
+
+function write64(memory: LinearMemory, address: number, value: bigint): void {
+  for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
+}
+
+function createCpu(): Core64 {
+  const memory = new LinearMemory();
+  write64(memory, 0x1000, 0x2003n); write64(memory, 0x2000, 0x3003n);
+  write64(memory, 0x3000, 0x4003n); write64(memory, 0x4000, 0x8003n);
+  return new Core64(new LongModeAddressSpace(memory, createLongModeControlState({ cr3: 0x1000n })));
+}
+
+describe("JustGo Core-64 narrow interpreter", () => {
+  it("executes REX.W MOV, extended-register MOV, arithmetic and HLT", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+      0x49, 0xb8, 0xef, 0xbe, 0xad, 0xde, 0, 0, 0, 0,
+      0x48, 0x05, 0x05, 0, 0, 0,
+      0xf4,
+    ]));
+    expect(cpu.run().map((entry) => entry.mnemonic)).toEqual(["MOV RAX, imm64", "MOV R8, imm64", "ADD RAX, imm32", "HLT"]);
+    expect(cpu.state.rax).toBe(0x0102_0304_0506_070dn);
+    expect(cpu.state.r8).toBe(0x0000_0000_dead_beefn);
+  });
+
+  it("zero extends a 32-bit immediate write", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([0xb8, 0x78, 0x56, 0x34, 0x12, 0xf4]));
+    cpu.run();
+    expect(cpu.state.rax).toBe(0x1234_5678n);
+  });
+});
