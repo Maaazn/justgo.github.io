@@ -4,6 +4,7 @@
  */
 import type { MemoryBus } from "./memory";
 import type { PortBus } from "./ports";
+import { Ps2Controller } from "./ps2";
 import { u8 } from "./types";
 
 export interface InterruptSink {
@@ -164,19 +165,23 @@ export class SectorDisk {
 
 export class DevicePortBus implements PortBus {
   readonly debugOutput: number[] = [];
-  private readonly keyboard: number[] = [];
+  readonly ps2 = new Ps2Controller();
 
   enqueueKeyboardScanCode(code: number): void {
-    this.keyboard.push(u8(code));
+    this.ps2.enqueueScanCode(code);
   }
 
   in8(port: number): number {
-    if ((port & 0xffff) === 0x60) return this.keyboard.shift() ?? 0;
+    if ((port & 0xffff) === 0x60) return this.ps2.readData();
+    if ((port & 0xffff) === 0x64) return this.ps2.readStatus();
     return 0xff;
   }
 
   out8(port: number, value: number): void {
-    if ((port & 0xffff) === 0xe9) this.debugOutput.push(u8(value));
+    const normalizedPort = port & 0xffff;
+    if (normalizedPort === 0xe9) this.debugOutput.push(u8(value));
+    if (normalizedPort === 0x64) this.ps2.writeControllerCommand(value);
+    if (normalizedPort === 0x60) this.ps2.writeData(value);
   }
 
   debugText(): string {

@@ -78,6 +78,21 @@ describe("JustGo Core-16 devices", () => {
     expect(ports.debugText()).toBe(String.fromCharCode(0x1e));
   });
 
+  it("models PS/2 controller status, command byte and keyboard enable state", () => {
+    const ports = new DevicePortBus();
+    ports.enqueueKeyboardScanCode(0x1e);
+    expect(ports.in8(0x64) & 1).toBe(1);
+    expect(ports.in8(0x60)).toBe(0x1e);
+    ports.out8(0x64, 0x20);
+    expect(ports.in8(0x60)).toBe(0x45);
+    ports.out8(0x64, 0xad);
+    ports.enqueueKeyboardScanCode(0x30);
+    expect(ports.in8(0x60)).toBe(0);
+    ports.out8(0x64, 0xae);
+    ports.enqueueKeyboardScanCode(0x30);
+    expect(ports.in8(0x60)).toBe(0x30);
+  });
+
   it("maps a read-only firmware ROM and exposes a deterministic x86 reset vector", () => {
     const firmware = createResetVectorRom(0x1234);
     const bus = new MappedMemory(new LinearMemory(), [firmware]);
