@@ -117,4 +117,20 @@ describe("JustGo Core-16 devices", () => {
     expect(queue.nextPending()).toBe(0x08);
     expect(queue.nextPending()).toBe(0x08);
   });
+
+  it("delivers PIT IRQ0 to the guest once STI enables hardware interrupts", () => {
+    const memory = new LinearMemory();
+    const queue = new InterruptQueue();
+    const core = new Core16(memory, new DevicePortBus(), queue);
+    const pit = new ProgrammableIntervalTimer(queue);
+    memory.write16(0x08 * 4, 0x0100);
+    memory.write16(0x08 * 4 + 2, 0x0000);
+    memory.load(0x0100, Uint8Array.from([0xb8, 0x34, 0x12, 0xcf]));
+    core.loadProgram(Uint8Array.from([0xfb, 0xf4]));
+    pit.configureDivisor(1);
+    pit.advanceOscillatorTicks(1);
+    core.run();
+    expect(core.state.ax).toBe(0x1234);
+    expect(core.state.halted).toBe(true);
+  });
 });

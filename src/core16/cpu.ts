@@ -133,6 +133,12 @@ export class Core16 {
 
     switch (opcode) {
       case 0x90: return "NOP";
+      case 0xfa:
+        this.setFlag(FLAG_INTERRUPT, false);
+        return "CLI";
+      case 0xfb:
+        this.setFlag(FLAG_INTERRUPT, true);
+        return "STI";
       case 0xf4:
         this.state.halted = true;
         return "HLT";
