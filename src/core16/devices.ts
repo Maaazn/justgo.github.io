@@ -6,6 +6,10 @@ import type { MemoryBus } from "./memory";
 import type { PortBus } from "./ports";
 import { u8 } from "./types";
 
+export interface InterruptSink {
+  request(vector: number): void;
+}
+
 export interface MemoryMappedDevice {
   readonly start: number;
   readonly end: number;
@@ -103,6 +107,34 @@ export function createResetVectorRom(entryOffset = 0): FirmwareRom {
   bytes[vector + 3] = 0x00;
   bytes[vector + 4] = 0xf0;
   return new FirmwareRom(bytes, 0xf0000);
+}
+
+/**
+ * Minimal programmable interval timer. The CPU scheduler supplies oscillator
+ * ticks; each elapsed divisor period queues IRQ0. Port command decoding and
+ * clock calibration remain a later device layer.
+ */
+export class ProgrammableIntervalTimer {
+  static readonly OSCILLATOR_HZ = 1_193_182;
+  private divisor = 65_536;
+  private elapsed = 0;
+
+  constructor(private readonly interrupts: InterruptSink, private readonly irqVector = 0x08) {}
+
+  configureDivisor(value: number): void {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff) throw new Error("مقسّم PIT خارج النطاق.");
+    this.divisor = value === 0 ? 65_536 : value;
+    this.elapsed = 0;
+  }
+
+  advanceOscillatorTicks(ticks: number): number {
+    if (!Number.isInteger(ticks) || ticks < 0) throw new Error("عدد نبضات PIT غير صالح.");
+    this.elapsed += ticks;
+    const interrupts = Math.floor(this.elapsed / this.divisor);
+    this.elapsed %= this.divisor;
+    for (let index = 0; index < interrupts; index += 1) this.interrupts.request(this.irqVector);
+    return interrupts;
+  }
 }
 
 export class SectorDisk {

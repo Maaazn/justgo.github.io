@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Core16 } from "../src/core16/cpu";
-import { createResetVectorRom, DevicePortBus, FirmwareRom, MappedMemory, SectorDisk, TextModeVga } from "../src/core16/devices";
+import { createResetVectorRom, DevicePortBus, FirmwareRom, MappedMemory, ProgrammableIntervalTimer, SectorDisk, TextModeVga } from "../src/core16/devices";
 import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
 import { FLAG_INTERRUPT } from "../src/core16/types";
@@ -91,5 +91,15 @@ describe("JustGo Core-16 devices", () => {
 
   it("rejects ROM windows outside the system firmware range", () => {
     expect(() => new FirmwareRom(new Uint8Array(1), 0xeffff)).toThrow("ROM firmware");
+  });
+
+  it("queues IRQ0 after each configured PIT period", () => {
+    const queue = new InterruptQueue();
+    const pit = new ProgrammableIntervalTimer(queue);
+    pit.configureDivisor(4);
+    expect(pit.advanceOscillatorTicks(3)).toBe(0);
+    expect(pit.advanceOscillatorTicks(5)).toBe(2);
+    expect(queue.nextPending()).toBe(0x08);
+    expect(queue.nextPending()).toBe(0x08);
   });
 });
