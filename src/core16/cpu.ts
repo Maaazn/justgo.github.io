@@ -3,6 +3,7 @@
  * opcodes fail loudly; they never silently imitate a broader x86 engine.
  */
 import type { MemoryBus } from "./memory";
+import { decodeModRm, register16 } from "./modrm";
 import type { InterruptBus } from "./interrupts";
 import type { PortBus } from "./ports";
 import {
@@ -35,6 +36,12 @@ export class UnsupportedOpcodeError extends Error {
 export class StepLimitError extends Error {
   constructor(limit: number) {
     super(`تجاوز البرنامج حد ${limit} خطوة؛ أوقف JustGo التنفيذ لمنع حلقة غير منتهية.`);
+  }
+}
+
+export class UnsupportedAddressingModeError extends Error {
+  constructor(opcode: number, mod: number) {
+    super(`نمط ModR/M ذاكرة غير مدعوم بعد للتعليمة 0x${opcode.toString(16)} (mod=${mod}).`);
   }
 }
 
@@ -148,18 +155,33 @@ export class Core16 {
       case 0x05:
         this.state.ax = this.add16(this.state.ax, this.fetch16());
         return "ADD AX, imm16";
+      case 0x01: {
+        const { destination, source } = this.registerModRm(opcode, "rm-reg");
+        this.setReg(destination, this.add16(this.getReg(destination), this.getReg(source)));
+        return `ADD ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+      }
       case 0x2c:
         this.setAL(this.sub8(this.getAL(), this.fetch8()));
         return "SUB AL, imm8";
       case 0x2d:
         this.state.ax = this.sub16(this.state.ax, this.fetch16());
         return "SUB AX, imm16";
+      case 0x29: {
+        const { destination, source } = this.registerModRm(opcode, "rm-reg");
+        this.setReg(destination, this.sub16(this.getReg(destination), this.getReg(source)));
+        return `SUB ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+      }
       case 0x3c:
         this.sub8(this.getAL(), this.fetch8());
         return "CMP AL, imm8";
       case 0x3d:
         this.sub16(this.state.ax, this.fetch16());
         return "CMP AX, imm16";
+      case 0x39: {
+        const { destination, source } = this.registerModRm(opcode, "rm-reg");
+        this.sub16(this.getReg(destination), this.getReg(source));
+        return `CMP ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+      }
       case 0xa0:
         this.setAL(this.memory.read8(physicalAddress(this.state.ds, this.fetch16())));
         return "MOV AL, moffs8";
@@ -172,6 +194,16 @@ export class Core16 {
       case 0xa3:
         this.memory.write16(physicalAddress(this.state.ds, this.fetch16()), this.state.ax);
         return "MOV moffs16, AX";
+      case 0x89: {
+        const { destination, source } = this.registerModRm(opcode, "rm-reg");
+        this.setReg(destination, this.getReg(source));
+        return `MOV ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+      }
+      case 0x8b: {
+        const { destination, source } = this.registerModRm(opcode, "reg-rm");
+        this.setReg(destination, this.getReg(source));
+        return `MOV ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+      }
       case 0xc3:
         this.state.ip = this.pop16();
         return "RET";
@@ -223,6 +255,14 @@ export class Core16 {
   private fetch16(): number {
     const low = this.fetch8();
     return low | (this.fetch8() << 8);
+  }
+
+  private registerModRm(opcode: number, direction: "rm-reg" | "reg-rm"): { destination: Register16Name; source: Register16Name } {
+    const operand = decodeModRm(this.fetch8());
+    if (operand.mod !== 3) throw new UnsupportedAddressingModeError(opcode, operand.mod);
+    const reg = register16(operand.reg);
+    const rm = register16(operand.rm);
+    return direction === "rm-reg" ? { destination: rm, source: reg } : { destination: reg, source: rm };
   }
 
   private getReg(register: Register16Name): number { return this.state[register]; }
