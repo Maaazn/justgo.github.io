@@ -67,6 +67,44 @@ export class TextModeVga implements MemoryMappedDevice {
   }
 }
 
+/** Read-only firmware window for the 0xF0000–0xFFFFF system ROM region. */
+export class FirmwareRom implements MemoryMappedDevice {
+  readonly start: number;
+  readonly end: number;
+  readonly ignoredWrites: number[] = [];
+
+  constructor(bytes: Uint8Array, start = 0x100000 - bytes.length) {
+    if (bytes.length === 0 || bytes.length > 0x10000) throw new Error("حجم ROM firmware يجب أن يكون بين 1 و65536 بايت.");
+    if (start < 0xf0000 || start + bytes.length > 0x100000) throw new Error("يجب أن يقع ROM firmware داخل نافذة النظام العليا.");
+    this.bytes = bytes.slice();
+    this.start = start;
+    this.end = start + bytes.length - 1;
+  }
+
+  private readonly bytes: Uint8Array;
+
+  read8(offset: number): number {
+    return this.bytes[offset] ?? 0xff;
+  }
+
+  write8(_offset: number, value: number): void {
+    this.ignoredWrites.push(u8(value));
+  }
+}
+
+/** Builds a deterministic ROM whose x86 reset vector jumps to `entryOffset`. */
+export function createResetVectorRom(entryOffset = 0): FirmwareRom {
+  if (!Number.isInteger(entryOffset) || entryOffset < 0 || entryOffset > 0xfffb) throw new Error("مدخل ROM firmware خارج النطاق.");
+  const bytes = new Uint8Array(0x10000).fill(0xf4);
+  const vector = 0xfff0;
+  bytes[vector] = 0xea; // far JMP ptr16:16
+  bytes[vector + 1] = entryOffset & 0xff;
+  bytes[vector + 2] = entryOffset >>> 8;
+  bytes[vector + 3] = 0x00;
+  bytes[vector + 4] = 0xf0;
+  return new FirmwareRom(bytes, 0xf0000);
+}
+
 export class SectorDisk {
   private readonly bytes: Uint8Array;
 

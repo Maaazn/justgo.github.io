@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Core16 } from "../src/core16/cpu";
-import { DevicePortBus, MappedMemory, SectorDisk, TextModeVga } from "../src/core16/devices";
+import { createResetVectorRom, DevicePortBus, FirmwareRom, MappedMemory, SectorDisk, TextModeVga } from "../src/core16/devices";
 import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
 import { FLAG_INTERRUPT } from "../src/core16/types";
@@ -76,5 +76,20 @@ describe("JustGo Core-16 devices", () => {
     core.loadProgram(Uint8Array.from([0xe4, 0x60, 0xe6, 0xe9, 0xf4]));
     core.run();
     expect(ports.debugText()).toBe(String.fromCharCode(0x1e));
+  });
+
+  it("maps a read-only firmware ROM and exposes a deterministic x86 reset vector", () => {
+    const firmware = createResetVectorRom(0x1234);
+    const bus = new MappedMemory(new LinearMemory(), [firmware]);
+    expect(bus.read8(0xffff0)).toBe(0xea);
+    expect(bus.read16(0xffff1)).toBe(0x1234);
+    expect(bus.read16(0xffff3)).toBe(0xf000);
+    bus.write8(0xffff0, 0x90);
+    expect(bus.read8(0xffff0)).toBe(0xea);
+    expect(firmware.ignoredWrites).toEqual([0x90]);
+  });
+
+  it("rejects ROM windows outside the system firmware range", () => {
+    expect(() => new FirmwareRom(new Uint8Array(1), 0xeffff)).toThrow("ROM firmware");
   });
 });
