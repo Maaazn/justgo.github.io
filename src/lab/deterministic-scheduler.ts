@@ -40,6 +40,17 @@ export interface DeterministicStorageEvent {
   readonly lba?: number;
 }
 
+export interface ScheduledDeviceEvent {
+  readonly tick: number;
+  readonly source: "device" | "pic";
+  readonly kind: string;
+  readonly data: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface ScheduledDeviceObserver {
+  observe(event: ScheduledDeviceEvent): void;
+}
+
 export interface DeterministicSchedulerOptions {
   readonly instructionsPerTick: number;
   readonly oscillatorTicksPerInstruction: number;
@@ -67,7 +78,7 @@ export class DeterministicScheduler {
     private readonly pit: ClockedDevice,
     readonly trace: BootTrace,
     private readonly options: DeterministicSchedulerOptions,
-    private readonly peripherals: { readonly input?: ScheduledInput; readonly rtc?: ClockedRtc; readonly storage?: DeterministicStoragePump; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
+    private readonly peripherals: { readonly input?: ScheduledInput; readonly rtc?: ClockedRtc; readonly storage?: DeterministicStoragePump; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer; readonly deviceObserver?: ScheduledDeviceObserver } = {},
   ) {
     if (!Number.isInteger(options.instructionsPerTick) || options.instructionsPerTick <= 0) throw new Error("حصة تعليمات tick يجب أن تكون موجبة.");
     if (!Number.isInteger(options.oscillatorTicksPerInstruction) || options.oscillatorTicksPerInstruction < 0) throw new Error("نبضات PIT لكل تعليمة غير صالحة.");
@@ -92,12 +103,24 @@ export class DeterministicScheduler {
     this.trace.record(currentTick, "pit", "advance", { oscillatorTicks, generatedInterrupts });
     const rtcMilliseconds = this.options.millisecondsPerTick ?? 0;
     const rtcInterrupts = this.peripherals.rtc?.advanceMilliseconds(rtcMilliseconds) ?? 0;
-    if (this.peripherals.rtc) this.trace.record(currentTick, "device", "rtc", { milliseconds: rtcMilliseconds, generatedInterrupts: rtcInterrupts });
+    if (this.peripherals.rtc) {
+      const event = { tick: currentTick, source: "device" as const, kind: "rtc", data: { milliseconds: rtcMilliseconds, generatedInterrupts: rtcInterrupts } };
+      this.trace.record(event.tick, event.source, event.kind, event.data); this.peripherals.deviceObserver?.observe(event);
+    }
     for (const event of this.peripherals.storage?.pump() ?? []) {
-      this.trace.record(currentTick, "device", "storage", event.lba === undefined ? { kind: event.kind } : { kind: event.kind, lba: event.lba });
+      if (event.lba === undefined) {
+        const traceEvent = { tick: currentTick, source: "device" as const, kind: "storage", data: { kind: event.kind } };
+        this.trace.record(traceEvent.tick, traceEvent.source, traceEvent.kind, traceEvent.data); this.peripherals.deviceObserver?.observe(traceEvent);
+      } else {
+        const traceEvent = { tick: currentTick, source: "device" as const, kind: "storage", data: { kind: event.kind, lba: event.lba } };
+        this.trace.record(traceEvent.tick, traceEvent.source, traceEvent.kind, traceEvent.data); this.peripherals.deviceObserver?.observe(traceEvent);
+      }
     }
     const deliveredInterrupt = this.peripherals.interrupts?.dispatch() ?? null;
-    if (deliveredInterrupt !== null) this.trace.record(currentTick, "pic", "dispatch", { vector: deliveredInterrupt });
+    if (deliveredInterrupt !== null) {
+      const event = { tick: currentTick, source: "pic" as const, kind: "dispatch", data: { vector: deliveredInterrupt } };
+      this.trace.record(event.tick, event.source, event.kind, event.data); this.peripherals.deviceObserver?.observe(event);
+    }
     const frame = this.peripherals.framebuffer?.takeDirty();
     this.trace.record(currentTick, "video", "frame.ready", { guestSteps: this.cpu.state.steps, dirty: frame?.dirty ?? false, revision: frame?.revision ?? 0 });
     this.trace.record(currentTick, "scheduler", "tick.end", { executed, halted: this.cpu.state.halted });

@@ -1,5 +1,6 @@
 import type { Cpu64State, Register64Name } from "../core64/registers";
 import type { DeterministicInputEvent } from "./deterministic-input";
+import type { ScheduledDeviceEvent, ScheduledDeviceObserver } from "./deterministic-scheduler";
 import type { BootTraceEvent } from "./boot-trace";
 
 export type ReplayInput = DeterministicInputEvent & { readonly tick: number };
@@ -13,6 +14,12 @@ export interface ReplayDeviceEvent {
   readonly source: "pic" | "device";
   readonly kind: string;
   readonly data: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface DeviceReplayDivergence {
+  readonly index: number;
+  readonly expected?: ReplayDeviceEvent;
+  readonly actual?: ReplayDeviceEvent;
 }
 
 export interface TraceDivergence {
@@ -48,6 +55,30 @@ export interface DifferentialReplayResult {
 
 export interface ReplayMemoryReader {
   read8(address: bigint, access?: "read" | "execute"): number;
+}
+
+/** Validates RTC/storage/PIC events while a scheduler replay is executing. */
+export class ReplayDeviceVerifier implements ScheduledDeviceObserver {
+  private cursor = 0;
+  private divergence: DeviceReplayDivergence | undefined;
+
+  constructor(private readonly expected: readonly ReplayDeviceEvent[]) {}
+
+  observe(event: ScheduledDeviceEvent): void {
+    if (this.divergence) return;
+    const actual: ReplayDeviceEvent = { tick: event.tick, source: event.source, kind: event.kind, data: { ...event.data } };
+    const expected = this.expected[this.cursor];
+    if (!expected || JSON.stringify(expected) !== JSON.stringify(actual)) {
+      this.divergence = { index: this.cursor, expected, actual };
+      return;
+    }
+    this.cursor += 1;
+  }
+
+  finish(): DeviceReplayDivergence | undefined {
+    if (!this.divergence && this.cursor < this.expected.length) return { index: this.cursor, expected: this.expected[this.cursor] };
+    return this.divergence;
+  }
 }
 
 const CORE64_REPLAY_REGISTERS: readonly Register64Name[] = [

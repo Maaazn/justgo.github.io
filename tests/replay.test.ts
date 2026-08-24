@@ -9,9 +9,9 @@ import { ProgrammableIntervalTimer } from "../src/core16/devices";
 import { DualPic8259, PicIrqLineSink } from "../src/core16/pic";
 import { BootTrace } from "../src/lab/boot-trace";
 import { DeterministicPs2Input } from "../src/lab/deterministic-input";
-import { DeterministicScheduler, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
+import { DeterministicScheduler, type ScheduledCpu, type ScheduledDeviceObserver } from "../src/lab/deterministic-scheduler";
 import { CORE64_SCHEDULED_REPLAY_CORPUS } from "../src/lab/execution-corpus";
-import { captureCore64ReplayState, compareReplayExecutions, enqueueReplayInputsForTick, firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution, type ReplayInput } from "../src/lab/replay";
+import { captureCore64ReplayState, compareReplayExecutions, enqueueReplayInputsForTick, firstGuestStateDivergence, firstTraceDivergence, ReplayDeviceVerifier, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution, type ReplayInput } from "../src/lab/replay";
 import { Ps2Controller } from "../src/core16/ps2";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
@@ -38,7 +38,7 @@ function executeCore64ReplayFixture(initial = 3): ReplayExecution {
   return { trace: trace.snapshot(), guest: captureCore64ReplayState(cpu.state) };
 }
 
-function executeScheduledReplay(millisecondsPerTick: number, replayInputs: readonly ReplayInput[] = [{ tick: 0, kind: "keyboard", scanCode: 0x1c }]): ReplayExecution {
+function executeScheduledReplay(millisecondsPerTick: number, replayInputs: readonly ReplayInput[] = [{ tick: 0, kind: "keyboard", scanCode: 0x1c }], deviceObserver: ScheduledDeviceObserver | undefined = undefined): ReplayExecution {
   const scenario = CORE64_SCHEDULED_REPLAY_CORPUS[0]!;
   const memory = new LinearMemory();
   write64(memory, 0x1000, 0x2003n); write64(memory, 0x2000, 0x3003n); write64(memory, 0x3000, 0x4003n); write64(memory, 0x4000, 0x8003n);
@@ -58,6 +58,7 @@ function executeScheduledReplay(millisecondsPerTick: number, replayInputs: reado
     input,
     rtc,
     interrupts: { dispatch: () => pic.dispatch(new Core64IdtInterruptSink(cpu)) },
+    deviceObserver,
   });
   scheduler.runTick(); pic.out8(0x20, 0x20); pit.configureDivisor(0xffff); scheduler.runTick();
   return { trace: trace.snapshot(), guest: captureCore64ReplayState(cpu.state, space, [0n, 1n]) };
@@ -124,10 +125,16 @@ describe("deterministic replay", () => {
     expect(completed.guest.memory).toEqual({ "0x0": 0x90, "0x1": 0xf4 });
     const recordedInputs = replayInputsFromTrace(completed.trace);
     expect(recordedInputs).toEqual([{ tick: 0, kind: "keyboard", scanCode: 0x1c }]);
-    expect(compareReplayExecutions(completed, executeScheduledReplay(scenario.millisecondsPerTick, recordedInputs))).toMatchObject({ equivalent: true });
+    const deviceVerifier = new ReplayDeviceVerifier(replayDevicesFromTrace(completed.trace));
+    const injected = executeScheduledReplay(scenario.millisecondsPerTick, recordedInputs, deviceVerifier);
+    expect(deviceVerifier.finish()).toBeUndefined();
+    expect(compareReplayExecutions(completed, injected)).toMatchObject({ equivalent: true });
     expect(completed.trace.filter((event) => event.source === "pic").map((event) => event.data.vector)).toEqual(scenario.expectedVectors);
     const divergence = compareReplayExecutions(completed, executeScheduledReplay(0));
     expect(divergence.traceDivergence?.index).toBe(4);
     expect(divergence.guestStateDivergence).toMatchObject({ field: "rip", expected: 0x320n, actual: 1n });
+    const alteredDeviceVerifier = new ReplayDeviceVerifier(replayDevicesFromTrace(completed.trace));
+    executeScheduledReplay(0, recordedInputs, alteredDeviceVerifier);
+    expect(alteredDeviceVerifier.finish()).toMatchObject({ index: 0, expected: { kind: "rtc" }, actual: { data: { generatedInterrupts: 0 } } });
   });
 });
