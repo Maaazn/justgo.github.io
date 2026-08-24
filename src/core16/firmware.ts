@@ -21,6 +21,7 @@ export interface PcBiosOptions {
   readonly conventionalMemoryKiB?: number;
   readonly heads?: number;
   readonly sectorsPerTrack?: number;
+  readonly textSink?: (character: number) => void;
 }
 
 export const PC_BIOS_SEGMENT = 0xf000;
@@ -48,6 +49,8 @@ export class PcBiosServices implements FirmwareInterruptService {
   private readonly conventionalMemoryKiB: number;
   private readonly heads: number;
   private readonly sectorsPerTrack: number;
+  private cursorColumn = 0;
+  private cursorRow = 0;
 
   constructor(private readonly options: PcBiosOptions = {}) {
     this.conventionalMemoryKiB = options.conventionalMemoryKiB ?? 640;
@@ -61,6 +64,7 @@ export class PcBiosServices implements FirmwareInterruptService {
       this.setCarry(state, false);
       return true;
     }
+    if (vector === 0x10) return this.videoTeletype(state, memory);
     if (vector !== 0x13) return false;
     const ah = state.ax >>> 8;
     if (ah === 0x00) {
@@ -104,6 +108,27 @@ export class PcBiosServices implements FirmwareInterruptService {
     state.bx = 0xaa55;
     state.cx = (state.cx & 0xff00) | 0x01;
     state.ax &= 0x00ff;
+    this.setCarry(state, false);
+    return true;
+  }
+
+  private videoTeletype(state: Cpu16State, memory: MemoryBus): boolean {
+    const ah = state.ax >>> 8;
+    if (ah !== 0x0e) return false;
+    const character = state.ax & 0xff;
+    if (character === 0x0d) this.cursorColumn = 0;
+    else if (character === 0x0a) this.cursorRow = Math.min(24, this.cursorRow + 1);
+    else {
+      const offset = (this.cursorRow * 80 + this.cursorColumn) * 2;
+      memory.write8(0xb8000 + offset, character);
+      memory.write8(0xb8000 + offset + 1, 0x07);
+      this.options.textSink?.(character);
+      this.cursorColumn += 1;
+      if (this.cursorColumn >= 80) {
+        this.cursorColumn = 0;
+        this.cursorRow = Math.min(24, this.cursorRow + 1);
+      }
+    }
     this.setCarry(state, false);
     return true;
   }

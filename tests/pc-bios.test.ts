@@ -25,6 +25,17 @@ describe("JustGo PC BIOS services", () => {
     expect(core.state.flags & FLAG_CARRY).toBe(0);
   });
 
+  it("writes BIOS teletype output to guest VGA text memory", () => {
+    const memory = new LinearMemory();
+    const output: number[] = [];
+    const core = new Core16(memory, new TestPortBus(), undefined, {}, new PcBiosServices({ textSink: (character) => output.push(character) }));
+    core.loadProgram(Uint8Array.from([0xb4, 0x0e, 0xb0, 0x4a, 0xcd, 0x10, 0xf4]));
+    core.run();
+    expect(memory.read8(0xb8000)).toBe(0x4a);
+    expect(memory.read8(0xb8001)).toBe(0x07);
+    expect(String.fromCharCode(...output)).toBe("J");
+  });
+
   it("loads a boot sector through INT 13h CHS into ES:BX and hands it to the guest", () => {
     const disk = createDisk([sector([0xb8, 0xef, 0xbe, 0xf4])]);
     const memory = new LinearMemory();
