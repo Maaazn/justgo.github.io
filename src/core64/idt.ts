@@ -70,6 +70,7 @@ export function pushLongModeInterruptFrame(
 ): void {
   if (!gate.present) throw new LongModeIdtError(`بوابة IDT للمتجه ${gate.vector} غير present.`);
   if (gate.selector === 0) throw new LongModeIdtError(`بوابة IDT للمتجه ${gate.vector} لا تحتوي code selector صالحاً.`);
+  if ((gate.selector & 0x3) !== 0) throw new LongModeIdtError("انتقال امتياز IDT غير منفذ في Core-64 الحالي.");
   if (options.stackPointer !== undefined) state.rsp = options.stackPointer;
   const push = (value: bigint) => { state.rsp -= 8n; write64(memory, state.rsp, value); };
   push(state.rflags);
@@ -93,6 +94,7 @@ export function popLongModeIretFrame(memory: LongModeAddressSpace, state: Cpu64S
   const cs = pop();
   const rflags = pop();
   if (!isCanonicalAddress(rip)) throw new LongModeIdtError("IRETQ استعاد RIP غير canonical.");
+  if ((cs & 0x3n) !== 0n) throw new LongModeIdtError("IRETQ إلى privilege level مختلف غير منفذ في Core-64 الحالي.");
   state.rip = rip;
   state.cs = Number(cs & 0xffffn);
   state.rflags = rflags;

@@ -90,4 +90,14 @@ describe("JustGo Core-64 IDT delivery", () => {
     expect(cpu.state.rsp).toBe(0xa00n - 24n);
     expect(cpu.state.rip).toBe(0x380n);
   });
+
+  it("rejects an IDT gate that would require an unimplemented privilege transition", () => {
+    const { cpu, memory } = createFixture();
+    const vector = 0x41;
+    const gateAddress = 0x8000 + 0x400 + vector * 16;
+    writeGate(memory, gateAddress, 0x390n, 0xe);
+    memory.write8(gateAddress + 2, 0x1b);
+    cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
+    expect(() => cpu.deliverInterrupt(vector)).toThrow(/امتياز/);
+  });
 });
