@@ -90,6 +90,7 @@ describe("deterministic replay", () => {
     const expected = { rip: 0x100n, rsp: 0x900n, rflags: 0x202n, registers: { rax: 7n, rdx: 2n } };
     expect(firstGuestStateDivergence(expected, { ...expected, rip: 0x101n })).toMatchObject({ field: "rip", expected: 0x100n, actual: 0x101n });
     expect(firstGuestStateDivergence(expected, { ...expected, registers: { rax: 7n, rdx: 3n } })).toMatchObject({ field: "registers.rdx", expected: 2n, actual: 3n });
+    expect(firstGuestStateDivergence({ ...expected, memory: { "0x80": 0x12 } }, { ...expected, memory: { "0x80": 0x13 } })).toMatchObject({ field: "memory.0x80", expected: 0x12n, actual: 0x13n });
   });
 
   it("repeats an executable PML4 guest fixture and reports the first divergent CPU effect", () => {

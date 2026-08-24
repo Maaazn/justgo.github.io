@@ -24,6 +24,7 @@ export interface GuestReplayState {
   readonly rsp: bigint;
   readonly rflags: bigint;
   readonly registers: Readonly<Record<string, bigint>>;
+  readonly memory?: Readonly<Record<string, number>>;
 }
 
 export interface GuestStateDivergence {
@@ -43,16 +44,22 @@ export interface DifferentialReplayResult {
   readonly equivalent: boolean;
 }
 
+export interface ReplayMemoryReader {
+  read8(address: bigint, access?: "read" | "execute"): number;
+}
+
 const CORE64_REPLAY_REGISTERS: readonly Register64Name[] = [
   "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
   "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 ];
 
-/** Capture the Core-64 architectural state that must remain stable across replay. */
-export function captureCore64ReplayState(state: Readonly<Cpu64State>): GuestReplayState {
+/** Capture Core-64 registers and explicitly selected guest-memory bytes for replay. */
+export function captureCore64ReplayState(state: Readonly<Cpu64State>, memory: ReplayMemoryReader | undefined = undefined, watchedAddresses: readonly bigint[] = []): GuestReplayState {
   const registers: Record<string, bigint> = {};
   for (const name of CORE64_REPLAY_REGISTERS) registers[name] = state[name];
-  return { rip: state.rip, rsp: state.rsp, rflags: state.rflags, registers };
+  const watchedMemory: Record<string, number> = {};
+  if (memory) for (const address of watchedAddresses) watchedMemory[`0x${address.toString(16)}`] = memory.read8(address, "read");
+  return { rip: state.rip, rsp: state.rsp, rflags: state.rflags, registers, memory: watchedMemory };
 }
 
 /** Compare fully executed deterministic fixtures without hiding their first mismatch. */
@@ -114,6 +121,12 @@ export function firstGuestStateDivergence(expected: GuestReplayState, actual: Gu
     const wanted = expected.registers[name] ?? 0n;
     const found = actual.registers[name] ?? 0n;
     if (wanted !== found) return { field: `registers.${name}`, expected: wanted, actual: found };
+  }
+  const addresses = [...new Set([...Object.keys(expected.memory ?? {}), ...Object.keys(actual.memory ?? {})])].sort();
+  for (const address of addresses) {
+    const wanted = expected.memory?.[address] ?? 0;
+    const found = actual.memory?.[address] ?? 0;
+    if (wanted !== found) return { field: `memory.${address}`, expected: BigInt(wanted), actual: BigInt(found) };
   }
   return undefined;
 }
