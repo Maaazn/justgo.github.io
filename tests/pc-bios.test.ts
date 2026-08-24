@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Core16 } from "../src/core16/cpu";
-import { PcBiosServices, type BiosBlockDevice } from "../src/core16/firmware";
+import { PcBiosServices, PC_BIOS_SEGMENT, PC_RESET_OFFSET, installPcBiosBootRom, type BiosBlockDevice } from "../src/core16/firmware";
 import { LinearMemory } from "../src/core16/memory";
 import { TestPortBus } from "../src/core16/ports";
 import { FLAG_CARRY } from "../src/core16/types";
@@ -44,6 +44,19 @@ describe("JustGo PC BIOS services", () => {
     expect(core.state.cs).toBe(0);
     expect(core.state.ip).toBe(0x7c04);
     expect(core.state.flags & FLAG_CARRY).toBe(0);
+  });
+
+  it("executes the installed BIOS ROM from the reset vector and boots LBA0 without host handoff", () => {
+    const disk = createDisk([sector([0xb8, 0xce, 0xfa, 0xf4])]);
+    const memory = new LinearMemory();
+    installPcBiosBootRom(memory);
+    const core = new Core16(memory, new TestPortBus(), undefined, {}, new PcBiosServices({ bootDevice: disk }));
+    core.reset({ cs: PC_BIOS_SEGMENT, ip: PC_RESET_OFFSET, ds: 0, es: 0, ss: 0, sp: 0xfffe });
+    const trace = core.run();
+    expect(trace.map((entry) => entry.mnemonic)).toContain("INT imm8");
+    expect(core.state.ax).toBe(0xface);
+    expect(core.state.cs).toBe(0);
+    expect(core.state.ip).toBe(0x7c04);
   });
 
   it("reports EDD and reads an LBA sector from a Disk Address Packet", () => {

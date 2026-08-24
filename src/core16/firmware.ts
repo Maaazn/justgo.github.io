@@ -23,6 +23,26 @@ export interface PcBiosOptions {
   readonly sectorsPerTrack?: number;
 }
 
+export const PC_BIOS_SEGMENT = 0xf000;
+export const PC_BIOS_ENTRY_OFFSET = 0x0100;
+export const PC_RESET_OFFSET = 0xfff0;
+export const PC_BOOT_SECTOR_OFFSET = 0x7c00;
+
+/** Installs a small executable BIOS ROM that reads LBA0 through INT 13h and transfers to it. */
+export function installPcBiosBootRom(memory: MemoryBus): void {
+  memory.load(physicalAddress(PC_BIOS_SEGMENT, PC_RESET_OFFSET), Uint8Array.from([
+    0xea, 0x00, 0x01, 0x00, 0xf0,
+  ]));
+  memory.load(physicalAddress(PC_BIOS_SEGMENT, PC_BIOS_ENTRY_OFFSET), Uint8Array.from([
+    0xb8, 0x01, 0x02,
+    0xb9, 0x01, 0x00,
+    0xba, 0x80, 0x00,
+    0xbb, 0x00, 0x7c,
+    0xcd, 0x13,
+    0xea, 0x00, 0x7c, 0x00, 0x00,
+  ]));
+}
+
 /** Small deterministic PC BIOS service profile for boot corpus execution. */
 export class PcBiosServices implements FirmwareInterruptService {
   private readonly conventionalMemoryKiB: number;
