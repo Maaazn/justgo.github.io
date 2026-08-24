@@ -13,6 +13,7 @@ export interface Cpu64State {
   r12: bigint; r13: bigint; r14: bigint; r15: bigint;
   rip: bigint;
   rflags: bigint;
+  cs: number;
   halted: boolean;
   steps: number;
 }
@@ -28,6 +29,6 @@ export function createCpu64State(overrides: Partial<Cpu64State> = {}): Cpu64Stat
   return {
     rax: 0n, rbx: 0n, rcx: 0n, rdx: 0n, rsi: 0n, rdi: 0n, rbp: 0n, rsp: 0n,
     r8: 0n, r9: 0n, r10: 0n, r11: 0n, r12: 0n, r13: 0n, r14: 0n, r15: 0n,
-    rip: 0n, rflags: 0x2n, halted: false, steps: 0, ...overrides,
+    rip: 0n, rflags: 0x2n, cs: 0x8, halted: false, steps: 0, ...overrides,
   };
 }

@@ -3,6 +3,8 @@ import { LongModeAddressSpace } from "./address-space";
 import { add64, sub64, type Alu64Result } from "./alu";
 import { decodeRex, register64, signExtend32 } from "./decoder";
 import { decodeModRm64, decodeModRmMemory64 } from "./modrm";
+import { createLongModeIdtr, popLongModeIretFrame, pushLongModeInterruptFrame, readLongModeIdtGate, type LongModeIdtr } from "./idt";
+import type { LongModeExceptionFrame } from "./exceptions";
 import { createCpu64State, type Cpu64State, type Register64Name, u64, write32ZeroExtended } from "./registers";
 
 const FLAG_CARRY = 1n << 0n;
@@ -22,6 +24,7 @@ export interface Core64Trace {
  */
 export class Core64 {
   readonly state: Cpu64State;
+  private idtr: LongModeIdtr = createLongModeIdtr();
 
   constructor(private readonly memory: LongModeAddressSpace, state: Partial<Cpu64State> = {}) {
     this.state = createCpu64State(state);
@@ -32,6 +35,18 @@ export class Core64 {
     this.state.rip = virtualAddress;
     this.state.halted = false;
     this.state.steps = 0;
+  }
+
+  loadIdtr(idtr: LongModeIdtr): void { this.idtr = { ...idtr }; }
+
+  deliverException(frame: LongModeExceptionFrame): void {
+    const gate = readLongModeIdtGate(this.memory, this.idtr, frame.vector);
+    pushLongModeInterruptFrame(this.memory, this.state, gate, { returnRip: frame.rip, errorCode: frame.errorCode });
+  }
+
+  deliverInterrupt(vector: number): void {
+    const gate = readLongModeIdtGate(this.memory, this.idtr, vector);
+    pushLongModeInterruptFrame(this.memory, this.state, gate, { returnRip: this.state.rip });
   }
 
   run(maxSteps = 100_000): Core64Trace[] {
@@ -66,6 +81,9 @@ export class Core64 {
       case 0xf4:
         this.state.halted = true;
         return "HLT";
+      case 0xcf:
+        popLongModeIretFrame(this.memory, this.state);
+        return "IRETQ";
       case 0x05: {
         const immediate = this.fetch32();
         if (rex?.w) {
