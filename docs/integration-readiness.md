@@ -14,13 +14,13 @@
 | PIT وRTC | IRQ0 وIRQ8 يمران عبر PIC إلى IDT؛ تختبر EOI في fixture | نموذج جهاز محدود، لا RTC أو PIT كاملين |
 | ATA ووسيط محلي | LBA28 PIO وDRQ/FIFO، وATA مجدول يبقى BSY حتى `Blob/File` prefetch | لا مسار إقلاع قرص أو DMA أو AHCI |
 | ATA إلى IDT | اكتمال prefetch يولّد IRQ14 إلى PIC ثم بوابة Core-64 IDT | اختبارات sector جاهز وفشل prefetch وLBA محدد |
-| replay | trace + PS/2 payload + snapshot سجلات وذاكرة مراقبة | يقارن العنوان الأول المختلف، ولا يصوّر RAM كاملاً |
+| replay | trace + PS/2 payload + snapshot سجلات وذاكرة مراقبة، وverifier حي لـRTC/storage/PIC داخل scheduler | يقارن العنوان الأول المختلف، ولا يصوّر RAM كاملاً أو يفرض زمن Promise محلي |
 
 إكمال `Blob/File` غير متزامن بطبيعته: مرحلة التخزين لا تحجب CPU ولا تعرّض DRQ قبل جاهزية القطاع، لكن tick الذي تصبح فيه Promise جاهزة يتأثر بجدولة المضيف. تسجل المنصة ذلك كحد جهاز في trace؛ **لا** يدّعي المحرك بعد أن إعادة تشغيل الوسيط المحلي ستفرض completion على tick مضيف مماثل. أما fixtures الاختبار المتحكم بها فتثبت الترتيب `storage → PIC → IDT` بصورة حتمية.
 
 ## ما يثبته corpus الموحد
 
-ينفذ corpus مصغر NOP ثم IRETQ ضمن PML4. يسجل scheduler دفعة لوحة مفاتيح PS/2، ويولد PIT IRQ0، ثم RTC IRQ8، ويمرر المتجهات عبر PIC إلى IDT. يعيد الاختبار استخراج دفعة PS/2 من trace، ويحقنها ثانية في scheduler، ثم يقارن trace والسجلات وbytes الذاكرة المراقبة. كما يثبت مسار divergence بأن تعطيل زمن RTC يغيّر trace وحالة `RIP` بدلاً من إخفاء الفرق.
+ينفذ corpus مصغر NOP ثم IRETQ ضمن PML4. يسجل scheduler دفعة لوحة مفاتيح PS/2، ويولد PIT IRQ0، ثم RTC IRQ8، ويمرر المتجهات عبر PIC إلى IDT. يعيد الاختبار استخراج دفعة PS/2 من trace، ويحقنها ثانية في scheduler، ثم يقارن trace والسجلات وbytes الذاكرة المراقبة. ويراقب `ReplayDeviceVerifier` أحداث RTC/storage/PIC لحظة وقوعها في التشغيل الثاني، فيحدد أول اختلاف جهاز بدل تأجيله إلى فحص trace النهائي. كما يثبت مسار divergence بأن تعطيل زمن RTC يغيّر حدث الجهاز وحالة `RIP` بدلاً من إخفاء الفرق.
 
 ## حدود مانعة لأي ادعاء بالإقلاع
 
