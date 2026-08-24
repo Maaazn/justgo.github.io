@@ -8,9 +8,11 @@ import { CmosRtc } from "../src/core16/cmos";
 import { ProgrammableIntervalTimer } from "../src/core16/devices";
 import { DualPic8259, PicIrqLineSink } from "../src/core16/pic";
 import { BootTrace } from "../src/lab/boot-trace";
+import { DeterministicPs2Input } from "../src/lab/deterministic-input";
 import { DeterministicScheduler, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
 import { CORE64_SCHEDULED_REPLAY_CORPUS } from "../src/lab/execution-corpus";
-import { captureCore64ReplayState, compareReplayExecutions, firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution } from "../src/lab/replay";
+import { captureCore64ReplayState, compareReplayExecutions, enqueueReplayInputsForTick, firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution } from "../src/lab/replay";
+import { Ps2Controller } from "../src/core16/ps2";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
   for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
@@ -61,15 +63,26 @@ function executeScheduledReplay(millisecondsPerTick: number): ReplayExecution {
 describe("deterministic replay", () => {
   it("extracts PS/2 input replay slots and locates the first changed event", () => {
     const trace = new BootTrace();
-    trace.record(0, "scheduler", "tick.begin"); trace.record(0, "ps2", "input", { kind: "keyboard" }); trace.record(0, "cpu", "instruction", { opcode: 0x90 });
-    expect(replayInputsFromTrace(trace.snapshot())).toEqual([{ tick: 0, kind: "keyboard" }]);
+    trace.record(0, "scheduler", "tick.begin"); trace.record(0, "ps2", "input", { kind: "keyboard", scanCode: 0x1c }); trace.record(0, "cpu", "instruction", { opcode: 0x90 });
+    expect(replayInputsFromTrace(trace.snapshot())).toEqual([{ tick: 0, kind: "keyboard", scanCode: 0x1c }]);
     const changed = new BootTrace();
-    changed.record(0, "scheduler", "tick.begin"); changed.record(0, "ps2", "input", { kind: "mouse" }); changed.record(0, "cpu", "instruction", { opcode: 0x90 });
+    changed.record(0, "scheduler", "tick.begin"); changed.record(0, "ps2", "input", { kind: "mouse", deltaX: 3, deltaY: -2, buttons: 1 }); changed.record(0, "cpu", "instruction", { opcode: 0x90 });
     expect(firstTraceDivergence(trace.snapshot(), changed.snapshot())?.index).toBe(1);
   });
 
   it("rejects a malformed event sequence", () => {
-    expect(() => replayInputsFromTrace([{ tick: 0, sequence: 2, source: "ps2", kind: "input", data: { kind: "keyboard" } }])).toThrow("غير مرتب");
+    expect(() => replayInputsFromTrace([{ tick: 0, sequence: 2, source: "ps2", kind: "input", data: { kind: "keyboard", scanCode: 0x1c } }])).toThrow("غير مرتب");
+  });
+
+  it("re-injects the recorded PS/2 batch at its original scheduler tick", () => {
+    const trace = new BootTrace();
+    trace.record(2, "ps2", "input", { kind: "keyboard", scanCode: 0x1c });
+    const controller = new Ps2Controller(); const input = new DeterministicPs2Input(controller);
+    enqueueReplayInputsForTick(replayInputsFromTrace(trace.snapshot()), 1, input);
+    expect(input.deliver()).toEqual([]);
+    enqueueReplayInputsForTick(replayInputsFromTrace(trace.snapshot()), 2, input);
+    expect(input.deliver()).toEqual([{ kind: "keyboard", scanCode: 0x1c }]);
+    expect(controller.readData()).toBe(0x1c);
   });
 
   it("extracts PIC, RTC and storage slots for deterministic device replay", () => {

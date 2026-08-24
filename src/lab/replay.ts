@@ -1,9 +1,11 @@
 import type { Cpu64State, Register64Name } from "../core64/registers";
+import type { DeterministicInputEvent } from "./deterministic-input";
 import type { BootTraceEvent } from "./boot-trace";
 
-export interface ReplayInput {
-  readonly tick: number;
-  readonly kind: "keyboard" | "mouse";
+export type ReplayInput = DeterministicInputEvent & { readonly tick: number };
+
+export interface ReplayInputSink {
+  enqueue(event: DeterministicInputEvent): void;
 }
 
 export interface ReplayDeviceEvent {
@@ -83,10 +85,30 @@ export function replayInputsFromTrace(events: readonly BootTraceEvent[]): readon
     lastSequence = event.sequence; lastTick = event.tick;
     if (event.source !== "ps2" || event.kind !== "input") continue;
     const kind = event.data.kind;
-    if (kind !== "keyboard" && kind !== "mouse") throw new Error("حدث PS/2 في السجل لا يملك نوع إعادة صالحاً.");
-    inputs.push({ tick: event.tick, kind });
+    if (kind === "keyboard") {
+      const scanCode = event.data.scanCode;
+      if (typeof scanCode !== "number" || !Number.isInteger(scanCode) || scanCode < 0 || scanCode > 0xff) throw new Error("حدث لوحة PS/2 لا يملك scan code صالحاً.");
+      inputs.push({ tick: event.tick, kind, scanCode });
+      continue;
+    }
+    if (kind === "mouse") {
+      const { deltaX, deltaY, buttons } = event.data;
+      if (typeof deltaX !== "number" || typeof deltaY !== "number" || typeof buttons !== "number" || !Number.isInteger(deltaX) || !Number.isInteger(deltaY) || !Number.isInteger(buttons) || buttons < 0 || buttons > 7) throw new Error("حدث ماوس PS/2 لا يملك حركة إعادة صالحة.");
+      inputs.push({ tick: event.tick, kind, motion: { deltaX, deltaY, buttons } });
+      continue;
+    }
+    throw new Error("حدث PS/2 في السجل لا يملك نوع إعادة صالحاً.");
   }
   return inputs;
+}
+
+/** Re-inject only the input batch recorded for one scheduler tick. */
+export function enqueueReplayInputsForTick(inputs: readonly ReplayInput[], tick: number, sink: ReplayInputSink): void {
+  for (const input of inputs) {
+    if (input.tick !== tick) continue;
+    if (input.kind === "keyboard") sink.enqueue({ kind: "keyboard", scanCode: input.scanCode });
+    else sink.enqueue({ kind: "mouse", motion: { ...input.motion } });
+  }
 }
 
 /** Extract deterministic PIC/RTC/storage events at the tick where they occurred. */

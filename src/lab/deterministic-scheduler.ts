@@ -1,4 +1,5 @@
 import type { StepTrace } from "../core16/types";
+import type { Ps2MouseMotion } from "../core16/ps2";
 import { BootTrace } from "./boot-trace";
 
 export interface ScheduledCpu {
@@ -15,8 +16,12 @@ export interface ClockedRtc {
 }
 
 export interface ScheduledInput {
-  deliver(): readonly { readonly kind: string; readonly [key: string]: unknown }[];
+  deliver(): readonly ScheduledInputEvent[];
 }
+
+export type ScheduledInputEvent =
+  | { readonly kind: "keyboard"; readonly scanCode: number }
+  | { readonly kind: "mouse"; readonly motion: Ps2MouseMotion };
 
 export interface DirtyFramebuffer {
   takeDirty(): { readonly dirty: boolean; readonly revision: number };
@@ -73,7 +78,8 @@ export class DeterministicScheduler {
     const currentTick = this.tick++;
     this.trace.record(currentTick, "scheduler", "tick.begin", { instructionBudget: this.options.instructionsPerTick });
     for (const event of this.peripherals.input?.deliver() ?? []) {
-      this.trace.record(currentTick, "ps2", "input", { kind: event.kind });
+      if (event.kind === "keyboard") this.trace.record(currentTick, "ps2", "input", { kind: event.kind, scanCode: event.scanCode });
+      else this.trace.record(currentTick, "ps2", "input", { kind: event.kind, deltaX: event.motion.deltaX, deltaY: event.motion.deltaY, buttons: event.motion.buttons });
     }
     let executed = 0;
     while (executed < this.options.instructionsPerTick && !this.cpu.state.halted) {
