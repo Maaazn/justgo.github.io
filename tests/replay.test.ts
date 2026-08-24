@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BootTrace } from "../src/lab/boot-trace";
-import { firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace } from "../src/lab/replay";
+import { firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace } from "../src/lab/replay";
 
 describe("deterministic replay", () => {
   it("extracts PS/2 input replay slots and locates the first changed event", () => {
@@ -28,5 +28,11 @@ describe("deterministic replay", () => {
       { tick: 0, source: "device", kind: "ata.prefetch.ready", data: { lba: 3 } },
       { tick: 0, source: "pic", kind: "dispatch", data: { vector: 0x76 } },
     ]);
+  });
+
+  it("locates the first architectural guest-state difference after replay", () => {
+    const expected = { rip: 0x100n, rsp: 0x900n, rflags: 0x202n, registers: { rax: 7n, rdx: 2n } };
+    expect(firstGuestStateDivergence(expected, { ...expected, rip: 0x101n })).toMatchObject({ field: "rip", expected: 0x100n, actual: 0x101n });
+    expect(firstGuestStateDivergence(expected, { ...expected, registers: { rax: 7n, rdx: 3n } })).toMatchObject({ field: "registers.rdx", expected: 2n, actual: 3n });
   });
 });

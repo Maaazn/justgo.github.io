@@ -18,6 +18,19 @@ export interface TraceDivergence {
   readonly actual?: BootTraceEvent;
 }
 
+export interface GuestReplayState {
+  readonly rip: bigint;
+  readonly rsp: bigint;
+  readonly rflags: bigint;
+  readonly registers: Readonly<Record<string, bigint>>;
+}
+
+export interface GuestStateDivergence {
+  readonly field: string;
+  readonly expected: bigint;
+  readonly actual: bigint;
+}
+
 export function replayInputsFromTrace(events: readonly BootTraceEvent[]): readonly ReplayInput[] {
   let lastSequence = -1;
   let lastTick = -1;
@@ -51,6 +64,20 @@ export function firstTraceDivergence(expected: readonly BootTraceEvent[], actual
   const length = Math.max(expected.length, actual.length);
   for (let index = 0; index < length; index += 1) {
     if (JSON.stringify(expected[index]) !== JSON.stringify(actual[index])) return { index, expected: expected[index], actual: actual[index] };
+  }
+  return undefined;
+}
+
+/** Find the first architectural guest-state difference after replay. */
+export function firstGuestStateDivergence(expected: GuestReplayState, actual: GuestReplayState): GuestStateDivergence | undefined {
+  for (const field of ["rip", "rsp", "rflags"] as const) {
+    if (expected[field] !== actual[field]) return { field, expected: expected[field], actual: actual[field] };
+  }
+  const names = [...new Set([...Object.keys(expected.registers), ...Object.keys(actual.registers)])].sort();
+  for (const name of names) {
+    const wanted = expected.registers[name] ?? 0n;
+    const found = actual.registers[name] ?? 0n;
+    if (wanted !== found) return { field: `registers.${name}`, expected: wanted, actual: found };
   }
   return undefined;
 }
