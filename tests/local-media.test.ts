@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LocalFileBlockMedia, LocalMediaRangeError } from "../src/core16/local-media";
+import { LocalFileBlockMedia, LocalMediaRangeError, LocalMediaSectorCache } from "../src/core16/local-media";
 
 function image(bytes: number[]): Blob & { name?: string } {
   const file = new Blob([new Uint8Array(bytes)]);
@@ -19,5 +19,15 @@ describe("JustGo local-only block media", () => {
     const media = new LocalFileBlockMedia(image([0, 1, 2, 3]), "cdrom", 2);
     await expect(media.readSector(2)).rejects.toBeInstanceOf(LocalMediaRangeError);
     await expect(media.readRange(3, 2)).rejects.toBeInstanceOf(LocalMediaRangeError);
+  });
+
+  it("prefetches bounded sectors explicitly before a future guest ATA transfer", async () => {
+    const cache = new LocalMediaSectorCache(new LocalFileBlockMedia(image([1, 2, 3, 4]), "hard-disk", 2), 1);
+    expect(cache.has(0)).toBe(false);
+    await expect(cache.prefetch(0)).resolves.toEqual(new Uint8Array([1, 2]));
+    expect(cache.readCached(0)).toEqual(new Uint8Array([1, 2]));
+    expect(() => cache.readCached(1)).toThrow(LocalMediaRangeError);
+    await cache.prefetch(1);
+    expect(cache.has(0)).toBe(false);
   });
 });

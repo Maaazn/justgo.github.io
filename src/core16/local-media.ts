@@ -55,3 +55,35 @@ export class LocalFileBlockMedia {
     return new Uint8Array(await this.file.slice(offset, offset + length).arrayBuffer());
   }
 }
+
+/**
+ * Bounded sector cache for a local visitor-owned image. It is deliberately
+ * asynchronous: a future ATA scheduler prefetches a sector before exposing
+ * DRQ, rather than hiding File I/O behind a synchronous guest-port read.
+ */
+export class LocalMediaSectorCache {
+  private readonly sectors = new Map<number, Uint8Array>();
+
+  constructor(private readonly media: LocalFileBlockMedia, private readonly capacity = 128) {
+    if (!Number.isInteger(capacity) || capacity <= 0) throw new LocalMediaRangeError("سعة cache الوسيط المحلي غير صالحة.");
+  }
+
+  has(index: number): boolean { return this.sectors.has(index); }
+
+  async prefetch(index: number): Promise<Uint8Array> {
+    const cached = this.sectors.get(index);
+    if (cached) return cached.slice();
+    const sector = await this.media.readSector(index);
+    if (this.sectors.size >= this.capacity) this.sectors.delete(this.sectors.keys().next().value as number);
+    this.sectors.set(index, sector.slice());
+    return sector;
+  }
+
+  readCached(index: number): Uint8Array {
+    const sector = this.sectors.get(index);
+    if (!sector) throw new LocalMediaRangeError("قطاع الوسيط غير موجود في cache؛ يجب prefetch قبل تعريضه للضيف.");
+    return sector.slice();
+  }
+
+  clear(): void { this.sectors.clear(); }
+}
