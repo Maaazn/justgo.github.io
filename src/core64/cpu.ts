@@ -2,7 +2,7 @@ import { StepLimitError, UnsupportedOpcodeError } from "../core16/cpu";
 import { LongModeAddressSpace } from "./address-space";
 import { add64, sub64, type Alu64Result } from "./alu";
 import { decodeRex, register64, signExtend32 } from "./decoder";
-import { decodeModRm64 } from "./modrm";
+import { decodeModRm64, decodeModRmMemory64 } from "./modrm";
 import { createCpu64State, type Cpu64State, type Register64Name, u64, write32ZeroExtended } from "./registers";
 
 const FLAG_CARRY = 1n << 0n;
@@ -105,11 +105,32 @@ export class Core64 {
   }
 
   private executeRegisterMove(rex: ReturnType<typeof decodeRex>, direction: "rm-reg" | "reg-rm"): string {
-    const operand = decodeModRm64(this.fetch8(), rex, direction === "rm-reg" ? 0x89 : 0x8b);
+    const opcode = direction === "rm-reg" ? 0x89 : 0x8b;
+    const modrm = this.fetch8();
+    if (((modrm >>> 6) & 3) !== 3) {
+      const operand = decodeModRmMemory64(modrm, rex, { read8: () => this.fetch8(), read32: () => this.fetch32(), rip: () => this.state.rip }, (register) => this.getRegister(register));
+      const width64 = rex?.w ?? false;
+      if (direction === "rm-reg") this.writeMemoryOperand(operand.address, this.getRegister(operand.reg), width64);
+      else this.writeOperand(operand.reg, this.readMemoryOperand(operand.address, width64), width64);
+      return direction === "rm-reg" ? `MOV [${operand.address.toString(16)}], ${operand.reg.toUpperCase()}` : `MOV ${operand.reg.toUpperCase()}, [${operand.address.toString(16)}]`;
+    }
+    const operand = decodeModRm64(modrm, rex, opcode);
     const destination = direction === "rm-reg" ? operand.rm : operand.reg;
     const source = direction === "rm-reg" ? operand.reg : operand.rm;
     this.writeOperand(destination, this.getRegister(source), rex?.w ?? false);
     return `MOV ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+  }
+
+  private readMemoryOperand(address: bigint, width64: boolean): bigint {
+    let value = 0n;
+    const bytes = width64 ? 8 : 4;
+    for (let offset = 0; offset < bytes; offset += 1) value |= BigInt(this.memory.read8(address + BigInt(offset), "read")) << BigInt(offset * 8);
+    return value;
+  }
+
+  private writeMemoryOperand(address: bigint, value: bigint, width64: boolean): void {
+    const bytes = width64 ? 8 : 4;
+    for (let offset = 0; offset < bytes; offset += 1) this.memory.write8(address + BigInt(offset), Number((value >> BigInt(offset * 8)) & 0xffn));
   }
 
   private executeRegisterAlu(rex: ReturnType<typeof decodeRex>, operation: "add" | "sub" | "cmp"): string {

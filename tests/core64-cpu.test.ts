@@ -49,4 +49,17 @@ describe("JustGo Core-64 narrow interpreter", () => {
     expect(cpu.state.r8).toBe(0x15n);
     expect(cpu.state.r10).toBe(0x15n);
   });
+
+  it("moves 64-bit values through a PML4-translated ModR/M memory operand", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0x80, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0xb9, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+      0x48, 0x89, 0x08,
+      0x48, 0x8b, 0x10,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.rdx).toBe(0x1122_3344_5566_7788n);
+  });
 });
