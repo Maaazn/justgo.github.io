@@ -140,4 +140,18 @@ describe("JustGo Core-64 narrow interpreter", () => {
     expect(cpu.state.rflags & ((1n << 0n) | (1n << 11n))).toBe(0n);
     expect(cpu.state.rflags & (1n << 6n)).toBe(1n << 6n);
   });
+
+  it("moves an immediate directly into PML4-translated memory and sign-extends it with REX.W", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0x80, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0xc7, 0x00, 0xff, 0xff, 0xff, 0xff,
+      0x48, 0x8b, 0x10,
+      0xc7, 0xc3, 0x78, 0x56, 0x34, 0x12,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.rdx).toBe(0xffff_ffff_ffff_ffffn);
+    expect(cpu.state.rbx).toBe(0x1234_5678n);
+  });
 });

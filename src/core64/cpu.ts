@@ -132,6 +132,7 @@ export class Core64 {
       }
       case 0x89: return this.executeRegisterMove(rex, "rm-reg");
       case 0x8b: return this.executeRegisterMove(rex, "reg-rm");
+      case 0xc7: return this.executeMoveImmediateToRm(rex);
       case 0x01: return this.executeRegisterAlu(rex, "add");
       case 0x29: return this.executeRegisterAlu(rex, "sub");
       case 0x39: return this.executeRegisterAlu(rex, "cmp");
@@ -170,6 +171,22 @@ export class Core64 {
     const source = direction === "rm-reg" ? operand.reg : operand.rm;
     this.writeOperand(destination, this.getRegister(source), rex?.w ?? false);
     return `MOV ${destination.toUpperCase()}, ${source.toUpperCase()}`;
+  }
+
+  private executeMoveImmediateToRm(rex: ReturnType<typeof decodeRex>): string {
+    const modrm = this.fetch8();
+    if (((modrm >>> 3) & 7) !== 0) throw new UnsupportedOpcodeError(0xc7, Number(this.state.rip - 2n));
+    const width64 = rex?.w ?? false;
+    if (((modrm >>> 6) & 3) !== 3) {
+      const operand = decodeModRmMemory64(modrm, rex, { read8: () => this.fetch8(), read32: () => this.fetch32(), rip: () => this.state.rip }, (register) => this.getRegister(register));
+      const immediate = width64 ? signExtend32(this.fetch32()) : BigInt(this.fetch32());
+      this.writeMemoryOperand(operand.address, immediate, width64);
+      return `MOV [${operand.address.toString(16)}], imm${width64 ? "32" : "32"}`;
+    }
+    const operand = decodeModRm64(modrm, rex, 0xc7);
+    const immediate = width64 ? signExtend32(this.fetch32()) : BigInt(this.fetch32());
+    this.writeOperand(operand.rm, immediate, width64);
+    return `MOV ${operand.rm.toUpperCase()}, imm${width64 ? "32" : "32"}`;
   }
 
   private readMemoryOperand(address: bigint, width64: boolean): bigint {
