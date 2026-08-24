@@ -131,7 +131,7 @@ function render(): void {
           <div class="input-console"><span>INPUT MODE</span><p>${inputDetail}</p></div>
 
           <div class="workspace-actions">
-            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""} ${option.state === "blocked" ? "disabled" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
+            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -147,7 +147,7 @@ function render(): void {
       <section class="evidence-strip">
         <article><span>01</span><p>لا تستخدم هذه النسخة شبكة للضيف؛ الإقلاع المعروض يبقى بيئة محلية مقيدة.</p></article>
         <article><span>02</span><p>اختبار ReactOS محلي عند 256 MiB وصل إلى SeaBIOS وFreeLoader فقط؛ لا يوجد ادعاء بإقلاع سطح المكتب.</p></article>
-        <article><span>03</span><p>ذاكرة 1–2 GiB تجربة سطح مكتب بتأكيد صريح؛ الهاتف واللمس يتوقفان عند 512 MiB لحماية المتصفح.</p></article>
+        <article><span>03</span><p>تصل الذاكرة إلى 4 GiB لكل المتصفحات؛ يطلب JustGo السعة محلياً من المتصفح للجلسة الحالية.</p></article>
       </section>
     </main>
   `;
@@ -186,9 +186,7 @@ async function launch(): Promise<void> {
     announce("booting", image.source === "user-provided" ? "يقرأ JustGo الملف محلياً داخل الذاكرة ثم يحاول الإقلاع. لا يُرفع الملف." : "يقلع FreeDOS داخل متصفحك. قد يستغرق التحضير الأول وقتاً قصيراً.");
     const memoryOption = memoryOptions(detectMemoryEnvironment()).find((option) => option.miB === selectedMemoryMiB);
     if (!memoryOption) throw new Error("خيار الذاكرة المحدد غير معروف.");
-    const approval = memoryLaunchMessage(memoryOption);
-    if (memoryOption.state === "blocked") throw new Error(approval ?? "خيار الذاكرة غير متاح على هذا الجهاز.");
-    if (memoryOption.state === "confirmation" && !window.confirm(approval)) return;
+    void memoryLaunchMessage(memoryOption);
     const liveMount = document.querySelector<HTMLElement>("#screen-mount");
     if (!liveMount) throw new Error("تعذر تهيئة شاشة المحرك.");
     await runtime.boot(
