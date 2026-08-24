@@ -20,7 +20,7 @@ export function resolveInputProfile(capabilities: InputCapabilities): InputProfi
     return { mode: "pointer-lock", label: "ماوس مقفل عند الطلب", detail: "انقر داخل الشاشة لطلب التقاط المؤشر عندما يدعمه المتصفح." };
   }
   if (capabilities.pointerEvents) {
-    return { mode: "pointer-events", label: "ماوس/لمس مباشر", detail: "يعتمد على Pointer Events ولا يخفي المؤشر؛ هذا هو المسار الآمن لأجهزة iOS." };
+    return { mode: "pointer-events", label: "ماوس/لمس مباشر", detail: "يعتمد على Pointer Events ويعرض مؤشراً افتراضياً داخل الشاشة عند الماوس؛ هذا هو المسار الآمن لأجهزة iOS." };
   }
   return { mode: "touch-direct", label: "لمس مباشر", detail: "لا يدعم المتصفح Pointer Events؛ تستعمل الجلسة لمساً مباشراً فقط." };
 }
@@ -43,5 +43,33 @@ export function configureInputSurface(target: HTMLElement): InputProfile {
       void target.requestPointerLock?.();
     });
   }
+  installVirtualCursor(target);
   return profile;
+}
+
+/** Visual feedback only; v86 continues to own the actual guest mouse transport. */
+function installVirtualCursor(target: HTMLElement): void {
+  const cursor = document.createElement("span");
+  cursor.className = "guest-virtual-cursor";
+  cursor.setAttribute("aria-hidden", "true");
+  target.append(cursor);
+
+  const hide = () => {
+    cursor.hidden = true;
+    target.classList.remove("guest-pointer-active");
+  };
+  target.addEventListener("pointerleave", hide);
+  target.addEventListener("pointercancel", hide);
+  target.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch") {
+      hide();
+      return;
+    }
+    const bounds = target.getBoundingClientRect();
+    const x = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left));
+    const y = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
+    cursor.hidden = false;
+    cursor.style.transform = `translate(${x}px, ${y}px)`;
+    target.classList.add("guest-pointer-active");
+  });
 }

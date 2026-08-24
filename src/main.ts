@@ -7,6 +7,7 @@ import { LOCAL_IMAGES, getImageById } from "./engine/catalog";
 import type { LocalImageDescriptor, SessionState } from "./engine/contracts";
 import { LocalSessionMachine } from "./engine/session-machine";
 import { V86LocalRuntime } from "./engine/v86-runtime";
+import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type GuestMemoryMiB } from "./engine/memory-policy";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -26,6 +27,7 @@ let selectedImageId = "freedos-demo";
 let localWindowsKey = "";
 let selectedLocalFile: File | undefined;
 let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
+let selectedMemoryMiB: GuestMemoryMiB = 64;
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -59,6 +61,7 @@ function render(): void {
   const isRunning = snapshot.state === "running" || snapshot.state === "booting";
   const bootable = Boolean(image.imageUrl) || (supportsLocalMedia(image) && Boolean(selectedLocalFile));
   const inputDetail = runtime.inputProfile?.detail ?? "سيُكتشف أسلوب الماوس أو اللمس عند تشغيل الشاشة.";
+  const availableMemory = memoryOptions(detectMemoryEnvironment());
 
   app.innerHTML = `
     <main class="app-shell">
@@ -128,7 +131,7 @@ function render(): void {
           <div class="input-console"><span>INPUT MODE</span><p>${inputDetail}</p></div>
 
           <div class="workspace-actions">
-            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option><option value="256">256 MiB</option><option value="512">512 MiB (اختبار)</option></select></label>
+            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""} ${option.state === "blocked" ? "disabled" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -173,21 +176,25 @@ function announceRunning(message: string): void {
 
 async function launch(): Promise<void> {
   const image = selectedLaunchImage();
-  const memorySelect = document.querySelector<HTMLSelectElement>("#memory-select");
   const mount = document.querySelector<HTMLElement>("#screen-mount");
-  if (!memorySelect || !mount) return;
+  if (!mount) return;
 
   try {
     announce("validating", "يتحقق JustGo من مصدر البيئة وحدودها المحلية.", image.id);
     announce("loading-runtime", "يحمّل محرك x86 WebAssembly داخل هذه العلامة.");
     announce("preparing-storage", "يجهّز مساحة الذاكرة والأصل القابل للتحميل عند الطلب.");
     announce("booting", image.source === "user-provided" ? "يقرأ JustGo الملف محلياً داخل الذاكرة ثم يحاول الإقلاع. لا يُرفع الملف." : "يقلع FreeDOS داخل متصفحك. قد يستغرق التحضير الأول وقتاً قصيراً.");
+    const memoryOption = memoryOptions(detectMemoryEnvironment()).find((option) => option.miB === selectedMemoryMiB);
+    if (!memoryOption) throw new Error("خيار الذاكرة المحدد غير معروف.");
+    const approval = memoryLaunchMessage(memoryOption);
+    if (memoryOption.state === "blocked") throw new Error(approval ?? "خيار الذاكرة غير متاح على هذا الجهاز.");
+    if (memoryOption.state === "confirmation" && !window.confirm(approval)) return;
     const liveMount = document.querySelector<HTMLElement>("#screen-mount");
     if (!liveMount) throw new Error("تعذر تهيئة شاشة المحرك.");
     await runtime.boot(
       {
         image,
-        viewport: { width: 1024, height: 768, memoryMiB: Number(memorySelect.value) },
+        viewport: { width: 1024, height: 768, memoryMiB: selectedMemoryMiB },
         persistState: false,
       },
       liveMount,
@@ -227,6 +234,10 @@ function bindEvents(): void {
   document.querySelector<HTMLButtonElement>("#stop-session")?.addEventListener("click", () => void stop());
   document.querySelector<HTMLInputElement>("#windows-key")?.addEventListener("input", (event) => {
     localWindowsKey = (event.currentTarget as HTMLInputElement).value;
+  });
+  document.querySelector<HTMLSelectElement>("#memory-select")?.addEventListener("change", (event) => {
+    selectedMemoryMiB = Number((event.currentTarget as HTMLSelectElement).value) as GuestMemoryMiB;
+    render();
   });
   document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {
     selectedLocalFile = (event.currentTarget as HTMLInputElement).files?.[0];
