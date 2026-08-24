@@ -10,6 +10,10 @@ export interface ClockedDevice {
   advanceOscillatorTicks(ticks: number): number;
 }
 
+export interface ClockedRtc {
+  advanceMilliseconds(milliseconds: number): number;
+}
+
 export interface ScheduledInput {
   deliver(): readonly { readonly kind: string; readonly [key: string]: unknown }[];
 }
@@ -29,6 +33,7 @@ export interface DeterministicStoragePump {
 export interface DeterministicSchedulerOptions {
   readonly instructionsPerTick: number;
   readonly oscillatorTicksPerInstruction: number;
+  readonly millisecondsPerTick?: number;
 }
 
 export interface TickResult {
@@ -52,10 +57,11 @@ export class DeterministicScheduler {
     private readonly pit: ClockedDevice,
     readonly trace: BootTrace,
     private readonly options: DeterministicSchedulerOptions,
-    private readonly peripherals: { readonly input?: ScheduledInput; readonly storage?: DeterministicStoragePump; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
+    private readonly peripherals: { readonly input?: ScheduledInput; readonly rtc?: ClockedRtc; readonly storage?: DeterministicStoragePump; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
   ) {
     if (!Number.isInteger(options.instructionsPerTick) || options.instructionsPerTick <= 0) throw new Error("حصة تعليمات tick يجب أن تكون موجبة.");
     if (!Number.isInteger(options.oscillatorTicksPerInstruction) || options.oscillatorTicksPerInstruction < 0) throw new Error("نبضات PIT لكل تعليمة غير صالحة.");
+    if (options.millisecondsPerTick !== undefined && (!Number.isInteger(options.millisecondsPerTick) || options.millisecondsPerTick < 0)) throw new Error("زمن RTC لكل tick غير صالح.");
   }
 
   runTick(): TickResult {
@@ -73,6 +79,9 @@ export class DeterministicScheduler {
     const oscillatorTicks = executed * this.options.oscillatorTicksPerInstruction;
     const generatedInterrupts = this.pit.advanceOscillatorTicks(oscillatorTicks);
     this.trace.record(currentTick, "pit", "advance", { oscillatorTicks, generatedInterrupts });
+    const rtcMilliseconds = this.options.millisecondsPerTick ?? 0;
+    const rtcInterrupts = this.peripherals.rtc?.advanceMilliseconds(rtcMilliseconds) ?? 0;
+    if (this.peripherals.rtc) this.trace.record(currentTick, "device", "rtc", { milliseconds: rtcMilliseconds, generatedInterrupts: rtcInterrupts });
     for (const event of this.peripherals.storage?.pump() ?? []) {
       this.trace.record(currentTick, "device", "storage", { kind: event.kind });
     }
