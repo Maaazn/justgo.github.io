@@ -9,6 +9,7 @@ import { LocalSessionMachine } from "./engine/session-machine";
 import { V86LocalRuntime } from "./engine/v86-runtime";
 import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type GuestMemoryMiB } from "./engine/memory-policy";
 import { inferLocalMediaFormat, localMediaFormatMessage } from "./engine/local-media-format";
+import { DISPLAY_PRESETS, displayPreset, type DisplayPresetId } from "./engine/display-presets";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -29,6 +30,7 @@ let localWindowsKey = "";
 let selectedLocalFile: File | undefined;
 let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
 let selectedMemoryMiB: GuestMemoryMiB = 64;
+let selectedDisplayId: DisplayPresetId = "xga";
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -64,6 +66,7 @@ function render(): void {
   const inputDetail = runtime.inputProfile?.detail ?? "سيُكتشف أسلوب الماوس أو اللمس عند تشغيل الشاشة.";
   const availableMemory = memoryOptions(detectMemoryEnvironment());
   const isoSelected = selectedLocalFile ? inferLocalMediaFormat(selectedLocalFile.name) === "cdrom" : false;
+  const selectedDisplay = displayPreset(selectedDisplayId);
 
   app.innerHTML = `
     <main class="app-shell">
@@ -134,6 +137,7 @@ function render(): void {
 
           <div class="workspace-actions">
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
+            <label class="memory-field">هدف دقة العرض <select id="display-select" ${isRunning ? "disabled" : ""}>${DISPLAY_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === selectedDisplay.id ? "selected" : ""}>${preset.label}</option>`).join("")}</select><small>يضبط سطح العرض؛ وضع VGA الحقيقي يختاره نظام الضيف.</small></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -178,6 +182,7 @@ function announceRunning(message: string): void {
 
 async function launch(): Promise<void> {
   const image = selectedLaunchImage();
+  const selectedDisplay = displayPreset(selectedDisplayId);
   const mount = document.querySelector<HTMLElement>("#screen-mount");
   if (!mount) return;
 
@@ -197,7 +202,7 @@ async function launch(): Promise<void> {
     await runtime.boot(
       {
         image,
-        viewport: { width: 1024, height: 768, memoryMiB: selectedMemoryMiB },
+        viewport: { width: selectedDisplay.width, height: selectedDisplay.height, memoryMiB: selectedMemoryMiB },
         persistState: false,
       },
       liveMount,
@@ -240,6 +245,10 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLSelectElement>("#memory-select")?.addEventListener("change", (event) => {
     selectedMemoryMiB = Number((event.currentTarget as HTMLSelectElement).value) as GuestMemoryMiB;
+    render();
+  });
+  document.querySelector<HTMLSelectElement>("#display-select")?.addEventListener("change", (event) => {
+    selectedDisplayId = (event.currentTarget as HTMLSelectElement).value as DisplayPresetId;
     render();
   });
   document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {

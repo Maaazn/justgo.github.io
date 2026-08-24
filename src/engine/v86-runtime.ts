@@ -10,9 +10,12 @@ import { configureInputSurface, type InputProfile } from "./input-control";
 const V86_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/seabios.bin";
 const V86_VGA_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/vgabios.bin";
 
-function prepareScreen(mount: HTMLElement): HTMLElement {
+function prepareScreen(mount: HTMLElement, width: number, height: number): HTMLElement {
   const screen = document.createElement("div");
   screen.className = "v86-screen";
+  screen.style.setProperty("--guest-display-width", `${width}px`);
+  screen.style.setProperty("--guest-display-height", `${height}px`);
+  screen.dataset.displayTarget = `${width}x${height}`;
 
   const textLayer = document.createElement("div");
   textLayer.className = "v86-text-layer";
@@ -46,7 +49,7 @@ export class V86LocalRuntime implements RuntimeBridge {
   async boot(request: LocalLaunchRequest, mount: HTMLElement): Promise<void> {
     await this.stop();
     const image = requireBootableImage(request);
-    const screen = prepareScreen(mount);
+    const screen = prepareScreen(mount, request.viewport.width, request.viewport.height);
     this.inputProfile = configureInputSurface(screen);
     const media: V86Image = image.localFile
       ? ({ buffer: image.localFile, async: true } as unknown as V86Image)
