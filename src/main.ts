@@ -10,7 +10,7 @@ import { V86LocalRuntime } from "./engine/v86-runtime";
 import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type GuestMemoryMiB } from "./engine/memory-policy";
 import { inferLocalMediaFormat, localMediaFormatMessage } from "./engine/local-media-format";
 import { DISPLAY_PRESETS, displayPreset, type DisplayPresetId } from "./engine/display-presets";
-import { clearRecoveryMedium, loadRecoveryMedium, loadRecoverySettings, saveRecoveryMedium, saveRecoverySettings } from "./engine/session-recovery";
+import { clearRecoveryMedium, loadRecoveryMedium, loadRecoverySettings, requestPersistentRecoveryStorage, saveRecoveryMedium, saveRecoverySettings } from "./engine/session-recovery";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -72,8 +72,11 @@ function persistRecovery(): void {
     void clearRecoveryMedium().catch(() => undefined);
     return;
   }
-  void saveRecoveryMedium(selectedLocalFile).then(() => {
-    recoveryNote = "حُفظ ملف الوسيط محلياً للاستعادة بعد إعادة التحميل؛ لا يغادر جهازك.";
+  void saveRecoveryMedium(selectedLocalFile).then(async () => {
+    const persistent = await requestPersistentRecoveryStorage();
+    recoveryNote = persistent
+      ? "حُفظ الوسيط محلياً وطُلب له تخزين دائم للاستعادة بعد إعادة التحميل؛ لا يغادر جهازك."
+      : "حُفظ ملف الوسيط محلياً للاستعادة بعد إعادة التحميل؛ لا يغادر جهازك.";
   }).catch(() => {
     recoveryNote = "لم يتمكن المتصفح من الاحتفاظ بالوسيط محلياً؛ ستبقى الإعدادات محفوظة فقط.";
   });

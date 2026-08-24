@@ -71,3 +71,12 @@ export async function loadRecoveryMedium(): Promise<File | undefined> {
 export async function clearRecoveryMedium(): Promise<void> {
   await transaction("readwrite", (store) => store.delete(MEDIA_KEY));
 }
+
+export async function requestPersistentRecoveryStorage(): Promise<boolean> {
+  if (!navigator.storage?.persist) return false;
+  try {
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
