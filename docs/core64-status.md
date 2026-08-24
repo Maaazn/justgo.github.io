@@ -8,9 +8,10 @@
 | التحكم | CR0 وCR3 وCR4 وEFER وتسلسل readiness | اختبارات انتقال قانوني ومرفوض |
 | الذاكرة | PML4 رباعي المستويات وصفحات 4KiB وعناوين canonical | اختبارات read/write ورفض page fault |
 | الانتقال | نموذج protected → long mode مع code segment بعلم L | اختبار transition حتمي |
-| التعليمات | REX، MOV، ADD، SUB، CMP وHLT ضمن register/immediate محدود | برامج ضيف 64-bit مصغرة |
+| التعليمات | REX، MOV، ADD، SUB، CMP، HLT وIRETQ ضمن نطاق محدود | برامج ضيف 64-bit مصغرة |
+| operands الذاكرة | ModR/M بقاعدة وإزاحة وSIB وRIP-relative لمسار MOV | اختبار نقل 64-bit عبر PML4 |
 | الرسوميات | framebuffer RGBA فوق مساحة PML4 | اختبار pixel وsnapshot وحدود |
-| الاستثناءات | vectors وإطارات invalid opcode وGP وPF | اختبارات vector والسياق |
+| الاستثناءات والمقاطعات | vectors وإطارات invalid opcode وGP وPF، وIDTR/IDT 64-bit وinterrupt/trap gates وIRETQ | اختبارات frame وIRQ وexception عبر PML4 |
 
 ## القياس
 
@@ -18,7 +19,7 @@
 
 ## حدود صريحة
 
-لا ينفذ Core-64 حتى الآن address forms في ModR/M أو IDT حقيقية أو exception delivery إلى guest أو interrupts 64-bit أو large pages أو NX أو firmware أو متحكم تخزين أو USB ضيف. لذلك لا يشغل Windows أو Linux حقيقياً حالياً، ولا يجب تقديمه على أنه يفعل ذلك. تُبنى الطبقات التالية فقط بعد اختبار كل عقد ومطابقته.
+لا ينفذ Core-64 حتى الآن سوى جزء محدد من address forms في ModR/M، ولا يملك انتقال امتياز أو TSS/IST stack switching أو PIC/CMOS/ATA أو large pages أو NX أو firmware أو متحكم تخزين أو USB ضيف. لذلك لا يشغل Windows أو Linux حقيقياً حالياً، ولا يجب تقديمه على أنه يفعل ذلك. تُبنى الطبقات التالية فقط بعد اختبار كل عقد ومطابقته.
 
 ## المراجع الهندسية
 
