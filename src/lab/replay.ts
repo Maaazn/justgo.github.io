@@ -1,3 +1,4 @@
+import type { Cpu64State, Register64Name } from "../core64/registers";
 import type { BootTraceEvent } from "./boot-trace";
 
 export interface ReplayInput {
@@ -29,6 +30,41 @@ export interface GuestStateDivergence {
   readonly field: string;
   readonly expected: bigint;
   readonly actual: bigint;
+}
+
+export interface ReplayExecution {
+  readonly trace: readonly BootTraceEvent[];
+  readonly guest: GuestReplayState;
+}
+
+export interface DifferentialReplayResult {
+  readonly traceDivergence: TraceDivergence | undefined;
+  readonly guestStateDivergence: GuestStateDivergence | undefined;
+  readonly equivalent: boolean;
+}
+
+const CORE64_REPLAY_REGISTERS: readonly Register64Name[] = [
+  "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+  "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+];
+
+/** Capture the Core-64 architectural state that must remain stable across replay. */
+export function captureCore64ReplayState(state: Readonly<Cpu64State>): GuestReplayState {
+  const registers: Record<string, bigint> = {};
+  for (const name of CORE64_REPLAY_REGISTERS) registers[name] = state[name];
+  return { rip: state.rip, rsp: state.rsp, rflags: state.rflags, registers };
+}
+
+/** Compare fully executed deterministic fixtures without hiding their first mismatch. */
+export function compareReplayExecutions(expected: ReplayExecution, actual: ReplayExecution): DifferentialReplayResult {
+  const traceDivergence = firstTraceDivergence(expected.trace, actual.trace);
+  const guestStateDivergence = firstGuestStateDivergence(expected.guest, actual.guest);
+  return { traceDivergence, guestStateDivergence, equivalent: traceDivergence === undefined && guestStateDivergence === undefined };
+}
+
+/** Execute an isolated fixture twice, then report trace and architectural-state equivalence. */
+export function runRepeatedReplay(execute: () => ReplayExecution): DifferentialReplayResult {
+  return compareReplayExecutions(execute(), execute());
 }
 
 export function replayInputsFromTrace(events: readonly BootTraceEvent[]): readonly ReplayInput[] {
