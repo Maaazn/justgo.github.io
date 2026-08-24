@@ -11,7 +11,7 @@ import { BootTrace } from "../src/lab/boot-trace";
 import { DeterministicPs2Input } from "../src/lab/deterministic-input";
 import { DeterministicScheduler, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
 import { CORE64_SCHEDULED_REPLAY_CORPUS } from "../src/lab/execution-corpus";
-import { captureCore64ReplayState, compareReplayExecutions, enqueueReplayInputsForTick, firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution } from "../src/lab/replay";
+import { captureCore64ReplayState, compareReplayExecutions, enqueueReplayInputsForTick, firstGuestStateDivergence, firstTraceDivergence, replayDevicesFromTrace, replayInputsFromTrace, runRepeatedReplay, type ReplayExecution, type ReplayInput } from "../src/lab/replay";
 import { Ps2Controller } from "../src/core16/ps2";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
@@ -38,11 +38,12 @@ function executeCore64ReplayFixture(initial = 3): ReplayExecution {
   return { trace: trace.snapshot(), guest: captureCore64ReplayState(cpu.state) };
 }
 
-function executeScheduledReplay(millisecondsPerTick: number): ReplayExecution {
+function executeScheduledReplay(millisecondsPerTick: number, replayInputs: readonly ReplayInput[] = [{ tick: 0, kind: "keyboard", scanCode: 0x1c }]): ReplayExecution {
   const scenario = CORE64_SCHEDULED_REPLAY_CORPUS[0]!;
   const memory = new LinearMemory();
   write64(memory, 0x1000, 0x2003n); write64(memory, 0x2000, 0x3003n); write64(memory, 0x3000, 0x4003n); write64(memory, 0x4000, 0x8003n);
-  const cpu = new Core64(new LongModeAddressSpace(memory, createLongModeControlState({ cr3: 0x1000n })), { rsp: 0x900n, rflags: 0x202n });
+  const space = new LongModeAddressSpace(memory, createLongModeControlState({ cr3: 0x1000n }));
+  const cpu = new Core64(space, { rsp: 0x900n, rflags: 0x202n });
   writeGate(memory, 0x8000 + 0x400 + 0x20 * 16, 0x300n); writeGate(memory, 0x8000 + 0x400 + 0x70 * 16, 0x320n);
   memory.write8(0x8000 + 0x300, 0xcf); memory.write8(0x8000 + 0x320, 0xcf);
   cpu.loadIdtr({ base: 0x400n, limit: 0x7ff }); cpu.loadProgram(scenario.bytes);
@@ -51,13 +52,15 @@ function executeScheduledReplay(millisecondsPerTick: number): ReplayExecution {
   pic.out8(0xa0, 0x11); pic.out8(0xa1, 0x70); pic.out8(0xa1, 0x02); pic.out8(0xa1, 0x01);
   const pit = new ProgrammableIntervalTimer(new PicIrqLineSink(pic, 0)); pit.configureDivisor(1);
   const rtc = new CmosRtc(new PicIrqLineSink(pic, 8)); const trace = new BootTrace();
+  const input = new DeterministicPs2Input(new Ps2Controller()); enqueueReplayInputsForTick(replayInputs, 0, input);
   const scheduledCpu: ScheduledCpu = { state: cpu.state, step: () => { const step = cpu.step(); return { ...step, address: Number(step.address) }; } };
   const scheduler = new DeterministicScheduler(scheduledCpu, pit, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 1, millisecondsPerTick }, {
+    input,
     rtc,
     interrupts: { dispatch: () => pic.dispatch(new Core64IdtInterruptSink(cpu)) },
   });
   scheduler.runTick(); pic.out8(0x20, 0x20); pit.configureDivisor(0xffff); scheduler.runTick();
-  return { trace: trace.snapshot(), guest: captureCore64ReplayState(cpu.state) };
+  return { trace: trace.snapshot(), guest: captureCore64ReplayState(cpu.state, space, [0n, 1n]) };
 }
 
 describe("deterministic replay", () => {
@@ -118,9 +121,13 @@ describe("deterministic replay", () => {
     expect(runRepeatedReplay(() => executeScheduledReplay(scenario.millisecondsPerTick))).toMatchObject({ equivalent: true, traceDivergence: undefined, guestStateDivergence: undefined });
     const completed = executeScheduledReplay(scenario.millisecondsPerTick);
     expect(completed.guest.rip).toBe(scenario.expectedRip);
+    expect(completed.guest.memory).toEqual({ "0x0": 0x90, "0x1": 0xf4 });
+    const recordedInputs = replayInputsFromTrace(completed.trace);
+    expect(recordedInputs).toEqual([{ tick: 0, kind: "keyboard", scanCode: 0x1c }]);
+    expect(compareReplayExecutions(completed, executeScheduledReplay(scenario.millisecondsPerTick, recordedInputs))).toMatchObject({ equivalent: true });
     expect(completed.trace.filter((event) => event.source === "pic").map((event) => event.data.vector)).toEqual(scenario.expectedVectors);
     const divergence = compareReplayExecutions(completed, executeScheduledReplay(0));
-    expect(divergence.traceDivergence?.index).toBe(3);
+    expect(divergence.traceDivergence?.index).toBe(4);
     expect(divergence.guestStateDivergence).toMatchObject({ field: "rip", expected: 0x320n, actual: 1n });
   });
 });
