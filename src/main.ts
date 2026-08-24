@@ -146,8 +146,8 @@ function render(): void {
 
       <section class="evidence-strip">
         <article><span>01</span><p>لا تستخدم هذه النسخة شبكة للضيف؛ الإقلاع المعروض يبقى بيئة محلية مقيدة.</p></article>
-        <article><span>02</span><p>صورة الاختبار ليست ضمن Git. الكتالوج يحتفظ بالمصدر وحدود الدعم فقط.</p></article>
-        <article><span>03</span><p>يمكن تبديل موصل المحرك لاحقاً، لكن أي دعم Windows 10 يحتاج اختباراً مستقلاً ومشروعاً.</p></article>
+        <article><span>02</span><p>اختبار ReactOS محلي عند 256 MiB وصل إلى SeaBIOS وFreeLoader فقط؛ لا يوجد ادعاء بإقلاع سطح المكتب.</p></article>
+        <article><span>03</span><p>ذاكرة 1–2 GiB تجربة سطح مكتب بتأكيد صريح؛ الهاتف واللمس يتوقفان عند 512 MiB لحماية المتصفح.</p></article>
       </section>
     </main>
   `;
