@@ -62,4 +62,20 @@ describe("JustGo Core-64 narrow interpreter", () => {
     cpu.run();
     expect(cpu.state.rdx).toBe(0x1122_3344_5566_7788n);
   });
+
+  it("executes ADD and CMP against a PML4-translated memory operand", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0x80, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0xb9, 0x02, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0xba, 0x05, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0x89, 0x10,
+      0x48, 0x01, 0x08,
+      0x48, 0xba, 0x07, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0x39, 0x10,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.rflags & (1n << 6n)).toBe(1n << 6n);
+  });
 });

@@ -153,10 +153,26 @@ export class Core64 {
 
   private executeRegisterAlu(rex: ReturnType<typeof decodeRex>, operation: "add" | "sub" | "cmp"): string {
     const opcode = operation === "add" ? 0x01 : operation === "sub" ? 0x29 : 0x39;
-    const operand = decodeModRm64(this.fetch8(), rex, opcode);
+    const modrm = this.fetch8();
+    const width64 = rex?.w ?? false;
+    if (((modrm >>> 6) & 3) !== 3) {
+      const operand = decodeModRmMemory64(modrm, rex, { read8: () => this.fetch8(), read32: () => this.fetch32(), rip: () => this.state.rip }, (register) => this.getRegister(register));
+      const left = this.readMemoryOperand(operand.address, width64);
+      const right = this.getRegister(operand.reg);
+      const result = width64 ? (operation === "add" ? add64(left, right) : sub64(left, right)) : null;
+      if (width64 && result) {
+        this.applyAluFlags(result);
+        if (operation !== "cmp") this.writeMemoryOperand(operand.address, result.result, true);
+      } else {
+        const value = operation === "add" ? (Number(left & 0xffff_ffffn) + Number(right & 0xffff_ffffn)) >>> 0 : (Number(left & 0xffff_ffffn) - Number(right & 0xffff_ffffn)) >>> 0;
+        this.setFlag(FLAG_ZERO, value === 0); this.setFlag(FLAG_SIGN, (value & 0x8000_0000) !== 0);
+        if (operation !== "cmp") this.writeMemoryOperand(operand.address, BigInt(value), false);
+      }
+      return `${operation.toUpperCase()} [${operand.address.toString(16)}], ${operand.reg.toUpperCase()}`;
+    }
+    const operand = decodeModRm64(modrm, rex, opcode);
     const left = this.getRegister(operand.rm);
     const right = this.getRegister(operand.reg);
-    const width64 = rex?.w ?? false;
     if (width64) {
       const result = operation === "add" ? add64(left, right) : sub64(left, right);
       this.applyAluFlags(result);
