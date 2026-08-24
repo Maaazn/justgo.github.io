@@ -18,6 +18,14 @@ export interface Core64ExceptionCorpusCase {
   readonly expectedStackPointer: bigint;
 }
 
+export interface Core64ScheduledReplayCorpusCase {
+  readonly id: string;
+  readonly bytes: Uint8Array;
+  readonly millisecondsPerTick: number;
+  readonly expectedVectors: readonly number[];
+  readonly expectedRip: bigint;
+}
+
 export const CORE64_MEMORY_ALU_CORPUS: readonly Core64CorpusCase[] = [
   {
     id: "memory-mov-add-cmp",
@@ -39,5 +47,16 @@ export const CORE64_EXCEPTION_CORPUS: readonly Core64ExceptionCorpusCase[] = [
     faultAddress: 0xdeadn,
     expectedHandler: 0x310n,
     expectedStackPointer: 0x8e0n,
+  },
+];
+
+/** A small guest workload for deterministic PIT/RTC/PIC/IDT replay testing. */
+export const CORE64_SCHEDULED_REPLAY_CORPUS: readonly Core64ScheduledReplayCorpusCase[] = [
+  {
+    id: "pit-rtc-idt-roundtrip",
+    bytes: new Uint8Array([0x90, 0xf4]),
+    millisecondsPerTick: 1000,
+    expectedVectors: [0x20, 0x70],
+    expectedRip: 0x320n,
   },
 ];
