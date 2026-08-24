@@ -8,6 +8,7 @@ import type { LocalImageDescriptor, SessionState } from "./engine/contracts";
 import { LocalSessionMachine } from "./engine/session-machine";
 import { V86LocalRuntime } from "./engine/v86-runtime";
 import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type GuestMemoryMiB } from "./engine/memory-policy";
+import { inferLocalMediaFormat, localMediaFormatMessage } from "./engine/local-media-format";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -62,6 +63,7 @@ function render(): void {
   const bootable = Boolean(image.imageUrl) || (supportsLocalMedia(image) && Boolean(selectedLocalFile));
   const inputDetail = runtime.inputProfile?.detail ?? "سيُكتشف أسلوب الماوس أو اللمس عند تشغيل الشاشة.";
   const availableMemory = memoryOptions(detectMemoryEnvironment());
+  const isoSelected = selectedLocalFile ? inferLocalMediaFormat(selectedLocalFile.name) === "cdrom" : false;
 
   app.innerHTML = `
     <main class="app-shell">
@@ -101,8 +103,8 @@ function render(): void {
           ${supportsLocalMedia(image) ? `
             <label class="local-media-field">صورة محلية (ISO أو IMG)
               <input id="local-media" type="file" accept=".iso,.img,.raw,application/x-cd-image" ${isRunning ? "disabled" : ""}>
-              <select id="local-format" ${isRunning ? "disabled" : ""}><option value="hard-disk" ${selectedLocalFormat === "hard-disk" ? "selected" : ""}>قرص صلب / IMG</option><option value="cdrom" ${selectedLocalFormat === "cdrom" ? "selected" : ""}>قرص مدمج / ISO</option></select>
-              <small>${selectedLocalFile ? `تم اختيار: ${escapeText(selectedLocalFile.name)} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : image.id === "reactos-experimental" ? "للاختبار فقط: اختر ReactOS الرسمي محلياً. لا يُرفع أو يُحفظ أو يدخل إلى Git." : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
+              <select id="local-format" ${isRunning ? "disabled" : ""}><option value="hard-disk" ${selectedLocalFormat === "hard-disk" ? "selected" : ""} ${isoSelected ? "disabled" : ""}>قرص صلب / IMG</option><option value="cdrom" ${selectedLocalFormat === "cdrom" ? "selected" : ""}>قرص مدمج / ISO</option></select>
+              <small>${selectedLocalFile ? `${escapeText(localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat))} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : image.id === "reactos-experimental" ? "للاختبار فقط: اختر ReactOS الرسمي محلياً. لا يُرفع أو يُحفظ أو يدخل إلى Git." : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
             </label>
           ` : ""}
           <div class="terms-note"><b>حدود صريحة:</b> FreeDOS هنا اختبار للمحرك فقط. ReactOS مفتوح المصدر لكنه Alpha. Windows 10 غير مدعوم أو مرفق حالياً.</div>
@@ -180,6 +182,9 @@ async function launch(): Promise<void> {
   if (!mount) return;
 
   try {
+    if (selectedLocalFile && inferLocalMediaFormat(selectedLocalFile.name) === "cdrom" && selectedLocalFormat !== "cdrom") {
+      throw new Error("صورة ISO يجب أن تُربط كقرص مدمج / CD-ROM.");
+    }
     announce("validating", "يتحقق JustGo من مصدر البيئة وحدودها المحلية.", image.id);
     announce("loading-runtime", "يحمّل محرك x86 WebAssembly داخل هذه العلامة.");
     announce("preparing-storage", "يجهّز مساحة الذاكرة والأصل القابل للتحميل عند الطلب.");
@@ -239,11 +244,13 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {
     selectedLocalFile = (event.currentTarget as HTMLInputElement).files?.[0];
-    session.reset(selectedLocalFile ? "تم اختيار وسيط محلي؛ لا يغادر جهازك قبل أو بعد الإقلاع." : "لم يُختَر ملف محلي.");
+    if (selectedLocalFile) selectedLocalFormat = inferLocalMediaFormat(selectedLocalFile.name);
+    session.reset(selectedLocalFile ? `${localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat)} لا يغادر جهازك قبل أو بعد الإقلاع.` : "لم يُختَر ملف محلي.");
     render();
   });
   document.querySelector<HTMLSelectElement>("#local-format")?.addEventListener("change", (event) => {
-    selectedLocalFormat = (event.currentTarget as HTMLSelectElement).value === "cdrom" ? "cdrom" : "hard-disk";
+    const requested = (event.currentTarget as HTMLSelectElement).value === "cdrom" ? "cdrom" : "hard-disk";
+    selectedLocalFormat = selectedLocalFile && inferLocalMediaFormat(selectedLocalFile.name) === "cdrom" ? "cdrom" : requested;
     session.reset("تم تعديل نوع الوسيط المحلي؛ لم يُقرأ الملف بعد.");
     render();
   });
