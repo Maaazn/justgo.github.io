@@ -10,6 +10,7 @@ import { V86LocalRuntime } from "./engine/v86-runtime";
 import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type GuestMemoryMiB } from "./engine/memory-policy";
 import { inferLocalMediaFormat, localMediaFormatMessage } from "./engine/local-media-format";
 import { DISPLAY_PRESETS, displayPreset, type DisplayPresetId } from "./engine/display-presets";
+import { clearRecoveryMedium, loadRecoveryMedium, loadRecoverySettings, saveRecoveryMedium, saveRecoverySettings } from "./engine/session-recovery";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -32,6 +33,8 @@ let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
 let selectedMemoryMiB: GuestMemoryMiB = 64;
 let selectedDisplayId: DisplayPresetId = "xga";
 let enableAcpiExperimental = true;
+let retainLocalMedium = true;
+let recoveryNote = "تُحفظ الإعدادات محلياً؛ لا يُحفظ RAM أو يُرفع أي ملف.";
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -57,6 +60,45 @@ function selectedLaunchImage(): LocalImageDescriptor {
 
 function supportsLocalMedia(image: LocalImageDescriptor): boolean {
   return image.source === "user-provided" || image.id === "reactos-experimental";
+}
+
+function persistRecovery(): void {
+  try {
+    saveRecoverySettings({ imageId: selectedImageId, localFormat: selectedLocalFormat, memoryMiB: selectedMemoryMiB, displayId: selectedDisplayId, acpiExperimental: enableAcpiExperimental, retainLocalMedium });
+  } catch {
+    recoveryNote = "تعذر حفظ إعدادات الاستعادة محلياً في هذا المتصفح.";
+  }
+  if (!retainLocalMedium || !selectedLocalFile) {
+    void clearRecoveryMedium().catch(() => undefined);
+    return;
+  }
+  void saveRecoveryMedium(selectedLocalFile).then(() => {
+    recoveryNote = "حُفظ ملف الوسيط محلياً للاستعادة بعد إعادة التحميل؛ لا يغادر جهازك.";
+  }).catch(() => {
+    recoveryNote = "لم يتمكن المتصفح من الاحتفاظ بالوسيط محلياً؛ ستبقى الإعدادات محفوظة فقط.";
+  });
+}
+
+async function restoreRecovery(): Promise<void> {
+  const saved = loadRecoverySettings();
+  if (!saved) return;
+  selectedImageId = getImageById(saved.imageId).id;
+  selectedLocalFormat = saved.localFormat;
+  selectedMemoryMiB = saved.memoryMiB;
+  selectedDisplayId = saved.displayId;
+  enableAcpiExperimental = saved.acpiExperimental;
+  retainLocalMedium = saved.retainLocalMedium;
+  if (retainLocalMedium) {
+    try {
+      selectedLocalFile = await loadRecoveryMedium();
+      if (selectedLocalFile) {
+        selectedLocalFormat = inferLocalMediaFormat(selectedLocalFile.name);
+        recoveryNote = `${localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat)} استُعيد محلياً بعد إعادة التحميل.`;
+      }
+    } catch {
+      recoveryNote = "استُعيدت الإعدادات، لكن وسيط الإقلاع لم يعد متاحاً في مخزن المتصفح.";
+    }
+  }
 }
 
 function render(): void {
@@ -140,6 +182,7 @@ function render(): void {
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
             <label class="memory-field">هدف دقة العرض <select id="display-select" ${isRunning ? "disabled" : ""}>${DISPLAY_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === selectedDisplay.id ? "selected" : ""}>${preset.label}</option>`).join("")}</select><small>يضبط سطح العرض؛ وضع VGA الحقيقي يختاره نظام الضيف.</small></label>
             <label class="memory-field"><input id="acpi-toggle" type="checkbox" ${enableAcpiExperimental ? "checked" : ""} ${isRunning ? "disabled" : ""}> ACPI تجريبي<small>مفعّل لمسار Windows Boot Manager؛ يعتمد على دعم v86 التجريبي.</small></label>
+            <label class="memory-field"><input id="retain-medium" type="checkbox" ${retainLocalMedium ? "checked" : ""} ${isRunning ? "disabled" : ""}> احتفظ بالوسيط محلياً<small>${recoveryNote}</small></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -238,6 +281,7 @@ function bindEvents(): void {
       selectedLocalFormat = selectedImage().format;
       selectedLocalFile = undefined;
       session.reset("تم اختيار بيئة جديدة؛ لم تُحمّل أي صورة بعد.");
+      persistRecovery();
       render();
     });
   });
@@ -248,28 +292,38 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLSelectElement>("#memory-select")?.addEventListener("change", (event) => {
     selectedMemoryMiB = Number((event.currentTarget as HTMLSelectElement).value) as GuestMemoryMiB;
+    persistRecovery();
     render();
   });
   document.querySelector<HTMLSelectElement>("#display-select")?.addEventListener("change", (event) => {
     selectedDisplayId = (event.currentTarget as HTMLSelectElement).value as DisplayPresetId;
+    persistRecovery();
     render();
   });
   document.querySelector<HTMLInputElement>("#acpi-toggle")?.addEventListener("change", (event) => {
     enableAcpiExperimental = (event.currentTarget as HTMLInputElement).checked;
+    persistRecovery();
+    render();
+  });
+  document.querySelector<HTMLInputElement>("#retain-medium")?.addEventListener("change", (event) => {
+    retainLocalMedium = (event.currentTarget as HTMLInputElement).checked;
+    persistRecovery();
     render();
   });
   document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {
     selectedLocalFile = (event.currentTarget as HTMLInputElement).files?.[0];
     if (selectedLocalFile) selectedLocalFormat = inferLocalMediaFormat(selectedLocalFile.name);
     session.reset(selectedLocalFile ? `${localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat)} لا يغادر جهازك قبل أو بعد الإقلاع.` : "لم يُختَر ملف محلي.");
+    persistRecovery();
     render();
   });
   document.querySelector<HTMLSelectElement>("#local-format")?.addEventListener("change", (event) => {
     const requested = (event.currentTarget as HTMLSelectElement).value === "cdrom" ? "cdrom" : "hard-disk";
     selectedLocalFormat = selectedLocalFile && inferLocalMediaFormat(selectedLocalFile.name) === "cdrom" ? "cdrom" : requested;
     session.reset("تم تعديل نوع الوسيط المحلي؛ لم يُقرأ الملف بعد.");
+    persistRecovery();
     render();
   });
 }
 
-render();
+void restoreRecovery().finally(render);
