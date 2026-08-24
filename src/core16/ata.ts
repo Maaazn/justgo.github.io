@@ -1,8 +1,24 @@
 /** ATA primary-channel PIO read core: LBA28, sector count, DRQ FIFO and IRQ14. */
 import type { InterruptSink } from "./devices";
+import { LocalMediaSectorCache } from "./local-media";
 import { u8 } from "./types";
 
 export interface AtaBlockMedia { readonly sectorSize: number; readonly sectorCount: number; readSector(index: number): Uint8Array; }
+
+/**
+ * Bridges visitor-owned asynchronous Blob storage to synchronous ATA PIO.
+ * The scheduler must call prefetch before a guest command exposes DRQ.
+ */
+export class PrefetchedAtaMedia implements AtaBlockMedia {
+  readonly sectorSize = 512;
+
+  constructor(private readonly cache: LocalMediaSectorCache, readonly sectorCount: number) {
+    if (!Number.isInteger(sectorCount) || sectorCount <= 0) throw new Error("عدد قطاعات وسيط ATA المسبق غير صالح.");
+  }
+
+  async prefetch(index: number): Promise<Uint8Array> { return this.cache.prefetch(index); }
+  readSector(index: number): Uint8Array { return this.cache.readCached(index); }
+}
 
 export class AtaPioDevice {
   static readonly DATA = 0x1f0;

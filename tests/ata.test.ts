@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { AtaPioDevice } from "../src/core16/ata";
+import { AtaPioDevice, PrefetchedAtaMedia } from "../src/core16/ata";
 import { SectorDisk } from "../src/core16/devices";
+import { LocalFileBlockMedia, LocalMediaSectorCache } from "../src/core16/local-media";
 
 describe("JustGo ATA PIO primary device", () => {
   it("serves an LBA28 sector through the DRQ data FIFO and signals IRQ14", () => {
@@ -19,5 +20,14 @@ describe("JustGo ATA PIO primary device", () => {
     ata.out8(0x1f2, 1); ata.out8(0x1f3, 4); ata.out8(0x1f6, 0xe0); ata.out8(0x1f7, 0x20);
     expect(ata.in8(0x1f7) & AtaPioDevice.STATUS_ERR).toBe(AtaPioDevice.STATUS_ERR);
     expect(ata.in8(0x1f0)).toBe(0xff);
+  });
+
+  it("exposes visitor-owned Blob sectors to ATA only after deterministic prefetch", async () => {
+    const bytes = new Uint8Array(512); bytes[0] = 0x5a;
+    const local = new LocalFileBlockMedia(new Blob([bytes]), "hard-disk");
+    const media = new PrefetchedAtaMedia(new LocalMediaSectorCache(local), local.sectorCount);
+    expect(() => media.readSector(0)).toThrow(/prefetch/);
+    await media.prefetch(0);
+    expect(media.readSector(0)[0]).toBe(0x5a);
   });
 });
