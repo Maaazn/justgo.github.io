@@ -6,6 +6,7 @@ import type { MemoryBus } from "./memory";
 import { decodeModRm, register16 } from "./modrm";
 import type { InterruptBus } from "./interrupts";
 import type { PortBus } from "./ports";
+import type { FirmwareInterruptService } from "./firmware";
 import {
   createCpu16State,
   FLAG_AUXILIARY,
@@ -26,6 +27,7 @@ import {
 } from "./types";
 
 const REGISTERS: readonly Register16Name[] = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"];
+const REGISTERS8: readonly ["al" | "cl" | "dl" | "bl" | "ah" | "ch" | "dh" | "bh", ...("al" | "cl" | "dl" | "bl" | "ah" | "ch" | "dh" | "bh")[]] = ["al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"];
 
 export class UnsupportedOpcodeError extends Error {
   constructor(opcode: number, address: number) {
@@ -48,7 +50,7 @@ export class UnsupportedAddressingModeError extends Error {
 export class Core16 {
   readonly state: Cpu16State;
 
-  constructor(private readonly memory: MemoryBus, private readonly ports: PortBus, private readonly interrupts?: InterruptBus, state: Partial<Cpu16State> = {}) {
+  constructor(private readonly memory: MemoryBus, private readonly ports: PortBus, private readonly interrupts?: InterruptBus, state: Partial<Cpu16State> = {}, private readonly firmware?: FirmwareInterruptService) {
     this.state = createCpu16State(state);
   }
 
@@ -110,6 +112,11 @@ export class Core16 {
       const register = REGISTERS[opcode - 0xb8];
       this.setReg(register, this.fetch16());
       return `MOV ${register.toUpperCase()}, imm16`;
+    }
+    if (opcode >= 0xb0 && opcode <= 0xb7) {
+      const register = REGISTERS8[opcode - 0xb0];
+      this.setReg8(register, this.fetch8());
+      return `MOV ${register.toUpperCase()}, imm8`;
     }
     if (opcode >= 0x40 && opcode <= 0x47) {
       const register = REGISTERS[opcode - 0x40];
@@ -208,7 +215,10 @@ export class Core16 {
         this.state.ip = this.pop16();
         return "RET";
       case 0xcd:
-        this.invokeInterrupt(this.fetch8());
+        {
+          const vector = this.fetch8();
+          if (!this.firmware?.handleInterrupt(vector, this.state, this.memory)) this.invokeInterrupt(vector);
+        }
         return "INT imm8";
       case 0xcf:
         this.state.ip = this.pop16();
@@ -276,6 +286,11 @@ export class Core16 {
   private setReg(register: Register16Name, value: number): void { this.state[register] = u16(value); }
   private getAL(): number { return this.state.ax & 0xff; }
   private setAL(value: number): void { this.state.ax = (this.state.ax & 0xff00) | u8(value); }
+  private setReg8(register: typeof REGISTERS8[number], value: number): void {
+    const pair: Record<typeof REGISTERS8[number], Register16Name> = { al: "ax", ah: "ax", cl: "cx", ch: "cx", dl: "dx", dh: "dx", bl: "bx", bh: "bx" };
+    const current = this.getReg(pair[register]);
+    this.setReg(pair[register], register.endsWith("h") ? (current & 0x00ff) | (u8(value) << 8) : (current & 0xff00) | u8(value));
+  }
 
   private relativeJump(offset: number): void { this.state.ip = u16(this.state.ip + offset); }
   private conditionalJump(condition: boolean): void { const offset = signed8(this.fetch8()); if (condition) this.relativeJump(offset); }
