@@ -33,6 +33,15 @@ class RejectingAtaMedia implements AsyncAtaBlockMedia {
   readSector(): Uint8Array { throw new Error("no cached sector after failed prefetch"); }
 }
 
+async function pumpUntilAtaCompletion(ata: ScheduledAtaPioDevice): Promise<readonly { readonly kind: string; readonly lba: number }[]> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const events = ata.pump();
+    if (events.length > 0) return events;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  return ata.pump();
+}
+
 describe("JustGo ATA PIO primary device", () => {
   it("serves an LBA28 sector through the DRQ data FIFO and signals IRQ14", () => {
     const disk = new SectorDisk(2); const sector = new Uint8Array(512); sector[0] = 0x34; sector[1] = 0x12; sector[511] = 0xfe; disk.writeSector(1, sector);
@@ -85,6 +94,19 @@ describe("JustGo ATA PIO primary device", () => {
     expect(ata.pump()).toEqual([{ kind: "ata.prefetch.error", lba: 0 }]);
     expect(ata.in8(0x1f7) & ScheduledAtaPioDevice.STATUS_ERR).toBe(ScheduledAtaPioDevice.STATUS_ERR);
     expect(ata.in8(0x1f7) & ScheduledAtaPioDevice.STATUS_DRQ).toBe(0);
+    expect(vectors).toEqual([0x76]);
+  });
+
+  it("bridges a visitor-owned Blob into the scheduled ATA path without exposing data before the selected sector is prefetched", async () => {
+    const bytes = new Uint8Array(1024); bytes[512] = 0x7c;
+    const local = new LocalFileBlockMedia(new Blob([bytes]), "hard-disk");
+    const media = new PrefetchedAtaMedia(new LocalMediaSectorCache(local, 1), local.sectorCount);
+    const vectors: number[] = []; const ata = new ScheduledAtaPioDevice(media, { request: (vector) => vectors.push(vector) });
+    ata.out8(0x1f2, 1); ata.out8(0x1f3, 1); ata.out8(0x1f6, 0xe0); ata.out8(0x1f7, 0x20);
+    expect(ata.in8(0x1f7) & ScheduledAtaPioDevice.STATUS_BSY).toBe(ScheduledAtaPioDevice.STATUS_BSY);
+    expect(ata.in8(0x1f0)).toBe(0xff);
+    expect(await pumpUntilAtaCompletion(ata)).toEqual([{ kind: "ata.prefetch.ready", lba: 1 }]);
+    expect(ata.in8(0x1f0)).toBe(0x7c);
     expect(vectors).toEqual([0x76]);
   });
 });
