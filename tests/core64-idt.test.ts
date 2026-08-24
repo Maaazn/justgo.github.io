@@ -4,6 +4,7 @@ import { LongModeAddressSpace } from "../src/core64/address-space";
 import { createLongModeControlState } from "../src/core64/control";
 import { Core64 } from "../src/core64/cpu";
 import { createExceptionFrame } from "../src/core64/exceptions";
+import { Core64IdtInterruptSink } from "../src/core64/pic-dispatch";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
   for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
@@ -67,5 +68,13 @@ describe("JustGo Core-64 IDT delivery", () => {
     expect(read64(space, 0x8e8n)).toBe(0x123n);
     expect(read64(space, 0x8f0n)).toBe(0x8n);
     expect(read64(space, 0x8f8n)).toBe(0x202n);
+  });
+
+  it("bridges a platform PIC vector into the configured guest IDT", () => {
+    const { cpu, memory } = createFixture();
+    writeGate(memory, 0x8000 + 0x400 + 0x28 * 16, 0x360n, 0xe);
+    cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
+    new Core64IdtInterruptSink(cpu).request(0x28);
+    expect(cpu.state.rip).toBe(0x360n);
   });
 });
