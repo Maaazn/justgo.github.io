@@ -13,6 +13,7 @@
 | [Bochs](https://github.com/bochs-emu/Bochs) | مرجع دقيق لأجهزة IA-32 ونماذج الاختبار | LGPL-2.1 | مرجع هندسي فقط حالياً؛ لا يُنسخ أو يدمج في المتصفح بلا مشروع ترخيص/port مستقل. |
 | [verr](https://github.com/nepx/verr) | اختبارات self-checking صغيرة تدل عبر منفذ I/O | يجب تدقيق ملف LICENSE قبل إدخال ملفات | مرشح ممتاز لadapter اختبار منفصل، لا يحمّل كـasset كبير ولا يدمج قبل تثبيت رخصته. |
 | [kvm-unit-tests](https://github.com/kvm-unit-tests/kvm-unit-tests) | corpus كبير لاختبارات CPU/ذاكرة/افتراضية | GPL-2.0 | مرجع لسيناريوهات الاختبار فقط. لا ينسخ إلى JustGo المرخص بصورة مختلفة. |
+| [Xen Test Framework](http://xenbits.xenproject.org/docs/xtf/) | سيناريوهات x86 microkernel لـfault/trap وإطارات المقاطعات، تشمل long mode | BSD-2-Clause | مصدر مرجعي لحالات fixture صغيرة خاصة بـCore-64؛ لا يدمج framework أو Xen-dependent binaries. |
 
 ## ترابط المرحلة التالية
 
@@ -37,3 +38,4 @@
 [5] [Bochs repository](https://github.com/bochs-emu/Bochs)  
 [6] [verr emulator tests](https://github.com/nepx/verr)  
 [7] [KVM unit tests](https://github.com/kvm-unit-tests/kvm-unit-tests)
+[8] [Xen Test Framework and license](http://xenbits.xenproject.org/docs/xtf/)
