@@ -45,4 +45,26 @@ describe("JustGo PC BIOS services", () => {
     expect(core.state.ip).toBe(0x7c04);
     expect(core.state.flags & FLAG_CARRY).toBe(0);
   });
+
+  it("reports EDD and reads an LBA sector from a Disk Address Packet", () => {
+    const disk = createDisk([sector([1]), sector([0xb8, 0x34, 0x12, 0xf4])]);
+    const memory = new LinearMemory();
+    memory.load(0x600, Uint8Array.from([
+      0x10, 0x00, 0x01, 0x00,
+      0x00, 0x7c, 0x00, 0x00,
+      0x01, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+    ]));
+    const core = new Core16(memory, new TestPortBus(), undefined, { ds: 0, si: 0x600 }, new PcBiosServices({ bootDevice: disk }));
+    core.loadProgram(Uint8Array.from([
+      0xb4, 0x41, 0xbb, 0xaa, 0x55, 0xb2, 0x80, 0xcd, 0x13,
+      0xb4, 0x42, 0xcd, 0x13,
+      0xea, 0x00, 0x7c, 0x00, 0x00,
+    ]));
+    core.run();
+    expect(core.state.ax).toBe(0x1234);
+    expect(core.state.bx).toBe(0xaa55);
+    expect(core.state.cx & 1).toBe(1);
+    expect(core.state.flags & FLAG_CARRY).toBe(0);
+  });
 });

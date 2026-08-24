@@ -48,6 +48,8 @@ export class PcBiosServices implements FirmwareInterruptService {
       this.setCarry(state, false);
       return true;
     }
+    if (ah === 0x41) return this.checkExtensions(state);
+    if (ah === 0x42) return this.readExtendedSectors(state, memory);
     if (ah !== 0x02 || !this.options.bootDevice) {
       this.failDisk(state, 0x01);
       return true;
@@ -71,7 +73,42 @@ export class PcBiosServices implements FirmwareInterruptService {
       this.failDisk(state, 0x04);
       return true;
     }
-    let destination = physicalAddress(state.es, state.bx);
+    return this.copySectors(state, memory, firstLba, count, physicalAddress(state.es, state.bx));
+  }
+
+  private checkExtensions(state: Cpu16State): boolean {
+    if (!this.options.bootDevice || (state.bx & 0xffff) !== 0x55aa || (state.dx & 0xff) !== 0x80) {
+      this.failDisk(state, 0x01);
+      return true;
+    }
+    state.bx = 0xaa55;
+    state.cx = (state.cx & 0xff00) | 0x01;
+    state.ax &= 0x00ff;
+    this.setCarry(state, false);
+    return true;
+  }
+
+  private readExtendedSectors(state: Cpu16State, memory: MemoryBus): boolean {
+    const device = this.options.bootDevice;
+    const packet = physicalAddress(state.ds, state.si);
+    if (!device || (state.dx & 0xff) !== 0x80 || memory.read8(packet) !== 0x10 || memory.read8(packet + 1) !== 0) {
+      this.failDisk(state, 0x01);
+      return true;
+    }
+    const count = memory.read16(packet + 2);
+    const destinationOffset = memory.read16(packet + 4);
+    const destinationSegment = memory.read16(packet + 6);
+    const lbaLow = memory.read16(packet + 8) | (memory.read16(packet + 10) << 16);
+    if (count === 0 || lbaLow + count > device.sectorCount || device.sectorSize !== 512) {
+      this.failDisk(state, 0x04);
+      return true;
+    }
+    return this.copySectors(state, memory, lbaLow, count, physicalAddress(destinationSegment, destinationOffset));
+  }
+
+  private copySectors(state: Cpu16State, memory: MemoryBus, firstLba: number, count: number, destinationStart: number): boolean {
+    const device = this.options.bootDevice!;
+    let destination = destinationStart;
     for (let index = 0; index < count; index += 1) {
       const bytes = device.readSector(firstLba + index);
       if (!bytes || bytes.byteLength !== 512) {
