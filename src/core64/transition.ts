@@ -1,4 +1,6 @@
 import { assertLongModeReady, type LongModeControlState, protectedModeEnabled64 } from "./control";
+import type { LongModeAddressSpace } from "./address-space";
+import { readLongModeGdtCodeDescriptor, type LongModeGdtr } from "./gdt";
 
 export type JustGoExecutionMode = "real" | "protected" | "long";
 
@@ -31,4 +33,15 @@ export function enterLongMode(state: LongModeMachineState, code: LongModeCodeSeg
   if ((code.selector & 0x3) !== 0) throw new Error("يتطلب انتقال long mode code segment بصلاحية kernel في المرحلة الحالية.");
   if (!code.present || !code.executable || !code.longMode) throw new Error("يتطلب انتقال long mode code segment موجوداً وقابلاً للتنفيذ بعلم L.");
   return { mode: "long", control: state.control, cs: code.selector & 0xffff, rip: entryRip & 0xffff_ffff_ffff_ffffn };
+}
+
+/** Enter long mode using the code descriptor stored in guest GDT memory. */
+export function enterLongModeFromGdt(
+  state: LongModeMachineState,
+  memory: LongModeAddressSpace,
+  gdtr: LongModeGdtr,
+  selector: number,
+  entryRip: bigint,
+): LongModeMachineState {
+  return enterLongMode(state, readLongModeGdtCodeDescriptor(memory, gdtr, selector), entryRip);
 }
