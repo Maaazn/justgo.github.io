@@ -12,6 +12,72 @@ export interface MemoryBus {
 
 const ADDRESS_MASK = 0xfffff;
 export const CORE16_PAGE_SIZE = 4096;
+export const SPARSE_PAGE_SIZE = 4096;
+
+/**
+ * Physical RAM backing for higher-address Core-64 experiments.
+ * It exposes a 4GiB address space while allocating only touched 4KiB pages.
+ * This does not make a browser reservation or assert host memory availability.
+ */
+export class SparsePhysicalMemory implements MemoryBus {
+  private readonly pages = new Map<number, Uint8Array>();
+
+  constructor(private readonly byteCapacity = 0x1_0000_0000) {
+    if (!Number.isSafeInteger(byteCapacity) || byteCapacity <= 0) throw new Error("سعة الذاكرة sparse يجب أن تكون عدداً صحيحاً موجباً.");
+  }
+
+  read8(address: number): number {
+    const normalized = this.normalize(address);
+    const page = this.pages.get(Math.floor(normalized / SPARSE_PAGE_SIZE));
+    return page?.[normalized % SPARSE_PAGE_SIZE] ?? 0;
+  }
+
+  read16(address: number): number {
+    return this.read8(address) | (this.read8(address + 1) << 8);
+  }
+
+  write8(address: number, value: number): void {
+    const normalized = this.normalize(address);
+    const pageIndex = Math.floor(normalized / SPARSE_PAGE_SIZE);
+    const page = this.pages.get(pageIndex) ?? this.allocate(pageIndex);
+    page[normalized % SPARSE_PAGE_SIZE] = u8(value);
+  }
+
+  write16(address: number, value: number): void {
+    const normalized = u16(value);
+    this.write8(address, normalized);
+    this.write8(address + 1, normalized >>> 8);
+  }
+
+  load(address: number, bytes: Uint8Array): void {
+    for (let index = 0; index < bytes.length; index += 1) this.write8(address + index, bytes[index] ?? 0);
+  }
+
+  clear(): void {
+    this.pages.clear();
+  }
+
+  allocatedPageCount(): number {
+    return this.pages.size;
+  }
+
+  allocatedByteLength(): number {
+    return this.pages.size * SPARSE_PAGE_SIZE;
+  }
+
+  private normalize(address: number): number {
+    if (!Number.isSafeInteger(address) || address < 0 || address >= this.byteCapacity) {
+      throw new RangeError(`العنوان المادي ${address} خارج سعة الذاكرة sparse.`);
+    }
+    return address;
+  }
+
+  private allocate(pageIndex: number): Uint8Array {
+    const page = new Uint8Array(SPARSE_PAGE_SIZE);
+    this.pages.set(pageIndex, page);
+    return page;
+  }
+}
 
 export class LinearMemory implements MemoryBus {
   private readonly bytes = new Uint8Array(ADDRESS_MASK + 1);
