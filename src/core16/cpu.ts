@@ -233,9 +233,15 @@ export class Core16 {
       case 0xe4:
         this.setAL(this.ports.in8(this.fetch8()));
         return "IN AL, imm8";
+      case 0xec:
+        this.setAL(this.ports.in8(this.state.dx));
+        return "IN AL, DX";
       case 0xe6:
         this.ports.out8(this.fetch8(), this.getAL());
         return "OUT imm8, AL";
+      case 0xee:
+        this.ports.out8(this.state.dx, this.getAL());
+        return "OUT DX, AL";
       case 0xe8:
         this.callRelative(signed16(this.fetch16()));
         return "CALL rel16";

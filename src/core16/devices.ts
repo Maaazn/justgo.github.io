@@ -7,6 +7,7 @@ import type { PortBus } from "./ports";
 import type { AtaPortDevice } from "./ata";
 import type { CmosRtc } from "./cmos";
 import type { DualPic8259 } from "./pic";
+import type { PciConfigurationMechanism } from "./pci";
 import { Ps2Controller } from "./ps2";
 import { u8 } from "./types";
 
@@ -222,7 +223,7 @@ export class DevicePortBus implements PortBus {
 
   constructor(
     private readonly strictUnsupportedPorts = false,
-    private readonly platform: { readonly pic?: DualPic8259; readonly cmos?: CmosRtc; readonly ata?: AtaPortDevice } = {},
+    private readonly platform: { readonly pic?: DualPic8259; readonly cmos?: CmosRtc; readonly ata?: AtaPortDevice; readonly pci?: PciConfigurationMechanism } = {},
   ) {}
 
   enqueueKeyboardScanCode(code: number): void {
@@ -238,6 +239,7 @@ export class DevicePortBus implements PortBus {
     if (this.platform.pic && (normalizedPort === 0x20 || normalizedPort === 0x21 || normalizedPort === 0xa0 || normalizedPort === 0xa1)) return this.platform.pic.in8(normalizedPort);
     if (this.platform.cmos && (normalizedPort === 0x70 || normalizedPort === 0x71)) return this.platform.cmos.in8(normalizedPort);
     if (this.platform.ata && (normalizedPort === 0x1f0 || (normalizedPort >= 0x1f2 && normalizedPort <= 0x1f7))) return this.platform.ata.in8(normalizedPort);
+    if (this.platform.pci && normalizedPort >= 0xcf8 && normalizedPort <= 0xcff) return this.platform.pci.in8(normalizedPort);
     if (normalizedPort === 0x60) return this.ps2.readData();
     if (normalizedPort === 0x64) return this.ps2.readStatus();
     this.reportUnsupported({ direction: "in", port: normalizedPort });
@@ -249,6 +251,7 @@ export class DevicePortBus implements PortBus {
     if (this.platform.pic && (normalizedPort === 0x20 || normalizedPort === 0x21 || normalizedPort === 0xa0 || normalizedPort === 0xa1)) { this.platform.pic.out8(normalizedPort, value); return; }
     if (this.platform.cmos && (normalizedPort === 0x70 || normalizedPort === 0x71)) { this.platform.cmos.out8(normalizedPort, value); return; }
     if (this.platform.ata && (normalizedPort === 0x1f0 || (normalizedPort >= 0x1f2 && normalizedPort <= 0x1f7))) { this.platform.ata.out8(normalizedPort, value); return; }
+    if (this.platform.pci && normalizedPort >= 0xcf8 && normalizedPort <= 0xcff) { this.platform.pci.out8(normalizedPort, value); return; }
     if (normalizedPort === 0xe9) { this.debugOutput.push(u8(value)); return; }
     if (normalizedPort === 0x64) { this.ps2.writeControllerCommand(value); return; }
     if (normalizedPort === 0x60) { this.ps2.writeData(value); return; }
