@@ -4,6 +4,9 @@ import { LocalMediaSectorCache } from "./local-media";
 import { u8 } from "./types";
 
 export interface AtaBlockMedia { readonly sectorSize: number; readonly sectorCount: number; readSector(index: number): Uint8Array; }
+export interface AsyncAtaBlockMedia { readonly sectorSize: number; readonly sectorCount: number; prefetch(index: number): Promise<Uint8Array>; readSector(index: number): Uint8Array; }
+export interface AtaPortDevice { in8(port: number): number; out8(port: number, value: number): void; }
+export interface AtaStorageEvent { readonly kind: "ata.prefetch.ready" | "ata.prefetch.error"; readonly lba: number; }
 
 /**
  * Bridges visitor-owned asynchronous Blob storage to synchronous ATA PIO.
@@ -103,5 +106,133 @@ export class AtaPioDevice {
     this.cursor = 0;
     this.status = AtaPioDevice.STATUS_RDY | AtaPioDevice.STATUS_DRQ;
     this.interrupts.request(this.irqVector);
+  }
+}
+
+/**
+ * Scheduler-owned ATA PIO read path for a visitor-selected local image.
+ * Port writes only queue asynchronous File prefetch work. The storage phase is
+ * the sole point that exposes DRQ and signals completion, so guest execution
+ * never blocks on Blob I/O or observes a sector before it is cached.
+ */
+export class ScheduledAtaPioDevice implements AtaPortDevice {
+  static readonly DATA = AtaPioDevice.DATA;
+  static readonly SECTOR_COUNT = AtaPioDevice.SECTOR_COUNT;
+  static readonly LBA_LOW = AtaPioDevice.LBA_LOW;
+  static readonly LBA_MID = AtaPioDevice.LBA_MID;
+  static readonly LBA_HIGH = AtaPioDevice.LBA_HIGH;
+  static readonly DRIVE = AtaPioDevice.DRIVE;
+  static readonly STATUS_COMMAND = AtaPioDevice.STATUS_COMMAND;
+  static readonly STATUS_DRQ = AtaPioDevice.STATUS_DRQ;
+  static readonly STATUS_ERR = AtaPioDevice.STATUS_ERR;
+  static readonly STATUS_RDY = AtaPioDevice.STATUS_RDY;
+  static readonly STATUS_BSY = 0x80;
+  private sectorCount = 0;
+  private lbaLow = 0;
+  private lbaMid = 0;
+  private lbaHigh = 0;
+  private drive = 0xe0;
+  private status = ScheduledAtaPioDevice.STATUS_RDY;
+  private fifo: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  private cursor = 0;
+  private sectorsRemaining = 0;
+  private nextLba = 0;
+  private pendingLba: number | undefined;
+  private completion: "ready" | "error" | undefined;
+
+  constructor(private readonly media: AsyncAtaBlockMedia, private readonly interrupts: InterruptSink, private readonly irqVector = 0x76) {
+    if (media.sectorSize !== 512) throw new Error("ATA PIO في هذه المرحلة يتطلب قطاعات 512 بايت.");
+  }
+
+  in8(port: number): number {
+    switch (port & 0xffff) {
+      case ScheduledAtaPioDevice.DATA: return this.readData();
+      case ScheduledAtaPioDevice.SECTOR_COUNT: return this.sectorCount;
+      case ScheduledAtaPioDevice.LBA_LOW: return this.lbaLow;
+      case ScheduledAtaPioDevice.LBA_MID: return this.lbaMid;
+      case ScheduledAtaPioDevice.LBA_HIGH: return this.lbaHigh;
+      case ScheduledAtaPioDevice.DRIVE: return this.drive;
+      case ScheduledAtaPioDevice.STATUS_COMMAND: return this.status;
+      default: throw new Error(`منفذ ATA غير صالح: 0x${port.toString(16)}.`);
+    }
+  }
+
+  out8(port: number, value: number): void {
+    const data = u8(value);
+    switch (port & 0xffff) {
+      case ScheduledAtaPioDevice.SECTOR_COUNT: this.sectorCount = data; return;
+      case ScheduledAtaPioDevice.LBA_LOW: this.lbaLow = data; return;
+      case ScheduledAtaPioDevice.LBA_MID: this.lbaMid = data; return;
+      case ScheduledAtaPioDevice.LBA_HIGH: this.lbaHigh = data; return;
+      case ScheduledAtaPioDevice.DRIVE: this.drive = data; return;
+      case ScheduledAtaPioDevice.STATUS_COMMAND: this.command(data); return;
+      default: throw new Error(`منفذ ATA غير صالح: 0x${port.toString(16)}.`);
+    }
+  }
+
+  snapshot(): Readonly<{ status: number; lba: number; sectorsRemaining: number; fifoBytesRemaining: number; pendingLba?: number }> {
+    return { status: this.status, lba: this.nextLba, sectorsRemaining: this.sectorsRemaining, fifoBytesRemaining: Math.max(0, this.fifo.length - this.cursor), pendingLba: this.pendingLba };
+  }
+
+  /** Called only by the deterministic scheduler storage phase. */
+  pump(): readonly AtaStorageEvent[] {
+    const lba = this.pendingLba;
+    if (lba === undefined || this.completion === undefined) return [];
+    const completion = this.completion;
+    this.pendingLba = undefined;
+    this.completion = undefined;
+    if (completion === "error") {
+      this.status = ScheduledAtaPioDevice.STATUS_RDY | ScheduledAtaPioDevice.STATUS_ERR;
+      this.interrupts.request(this.irqVector);
+      return [{ kind: "ata.prefetch.error", lba }];
+    }
+    try {
+      this.fifo = this.media.readSector(lba);
+      this.cursor = 0;
+      this.status = ScheduledAtaPioDevice.STATUS_RDY | ScheduledAtaPioDevice.STATUS_DRQ;
+      this.interrupts.request(this.irqVector);
+      return [{ kind: "ata.prefetch.ready", lba }];
+    } catch {
+      this.status = ScheduledAtaPioDevice.STATUS_RDY | ScheduledAtaPioDevice.STATUS_ERR;
+      this.interrupts.request(this.irqVector);
+      return [{ kind: "ata.prefetch.error", lba }];
+    }
+  }
+
+  private command(command: number): void {
+    this.status = ScheduledAtaPioDevice.STATUS_RDY;
+    this.pendingLba = undefined;
+    this.completion = undefined;
+    if (command !== 0x20 || (this.drive & 0x40) === 0) { this.status |= ScheduledAtaPioDevice.STATUS_ERR; return; }
+    this.nextLba = ((this.drive & 0x0f) << 24) | (this.lbaHigh << 16) | (this.lbaMid << 8) | this.lbaLow;
+    this.sectorsRemaining = this.sectorCount === 0 ? 256 : this.sectorCount;
+    this.queueNextSector();
+  }
+
+  private readData(): number {
+    if ((this.status & ScheduledAtaPioDevice.STATUS_DRQ) === 0) return 0xff;
+    const value = this.fifo[this.cursor++] ?? 0xff;
+    if (this.cursor >= this.fifo.length) {
+      this.sectorsRemaining -= 1;
+      this.nextLba += 1;
+      if (this.sectorsRemaining > 0) this.queueNextSector();
+      else { this.status = ScheduledAtaPioDevice.STATUS_RDY; this.interrupts.request(this.irqVector); }
+    }
+    return value;
+  }
+
+  private queueNextSector(): void {
+    if (this.nextLba < 0 || this.nextLba >= this.media.sectorCount) {
+      this.status = ScheduledAtaPioDevice.STATUS_RDY | ScheduledAtaPioDevice.STATUS_ERR;
+      this.interrupts.request(this.irqVector);
+      return;
+    }
+    const lba = this.nextLba;
+    this.status = ScheduledAtaPioDevice.STATUS_RDY | ScheduledAtaPioDevice.STATUS_BSY;
+    this.pendingLba = lba;
+    void this.media.prefetch(lba).then(
+      () => { if (this.pendingLba === lba) this.completion = "ready"; },
+      () => { if (this.pendingLba === lba) this.completion = "error"; },
+    );
   }
 }

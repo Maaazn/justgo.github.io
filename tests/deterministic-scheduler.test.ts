@@ -5,6 +5,7 @@ import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
 import { DualPic8259, PicIrqLineSink } from "../src/core16/pic";
 import { Ps2Controller } from "../src/core16/ps2";
+import { ScheduledAtaPioDevice, type AsyncAtaBlockMedia } from "../src/core16/ata";
 import { BootTrace } from "../src/lab/boot-trace";
 import { DeterministicPs2Input } from "../src/lab/deterministic-input";
 import { DeterministicScheduler, type ClockedDevice, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
@@ -22,6 +23,14 @@ class FakeCpu implements ScheduledCpu {
 class FakePit implements ClockedDevice {
   ticks = 0;
   advanceOscillatorTicks(ticks: number): number { this.ticks += ticks; return Math.floor(this.ticks / 6); }
+}
+
+class ReadyAtaMedia implements AsyncAtaBlockMedia {
+  readonly sectorSize = 512;
+  readonly sectorCount = 1;
+  private cached = false;
+  async prefetch(): Promise<Uint8Array> { this.cached = true; return new Uint8Array(512); }
+  readSector(): Uint8Array { if (!this.cached) throw new Error("missing cache"); return new Uint8Array(512); }
 }
 
 function runScenario(): BootTrace {
@@ -101,5 +110,28 @@ describe("JustGo deterministic scheduler", () => {
     expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual([
       "scheduler:tick.begin", "cpu:instruction", "pit:advance", "device:rtc", "device:storage", "pic:dispatch", "video:frame.ready", "scheduler:tick.end",
     ]);
+  });
+
+  it("records an ATA prefetch completion before dispatching its IRQ14 PIC vector", async () => {
+    const cpu: ScheduledCpu = { state: { halted: false, steps: 0 }, step: () => ({ address: 0, opcode: 0x90, mnemonic: "NOP" }) };
+    const pic = new DualPic8259();
+    pic.out8(0x21, 0); pic.out8(0xa1, 0);
+    pic.out8(0x20, 0x11); pic.out8(0x21, 0x20); pic.out8(0x21, 0x04); pic.out8(0x21, 0x01);
+    pic.out8(0xa0, 0x11); pic.out8(0xa1, 0x70); pic.out8(0xa1, 0x02); pic.out8(0xa1, 0x01);
+    const ata = new ScheduledAtaPioDevice(new ReadyAtaMedia(), new PicIrqLineSink(pic, 14));
+    ata.out8(0x1f2, 1); ata.out8(0x1f3, 0); ata.out8(0x1f6, 0xe0); ata.out8(0x1f7, 0x20);
+    await Promise.resolve();
+    const trace = new BootTrace(); const vectors: number[] = [];
+    const scheduler = new DeterministicScheduler(cpu, { advanceOscillatorTicks: () => 0 }, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 0 }, {
+      storage: ata,
+      interrupts: { dispatch: () => pic.dispatch({ request: (vector) => vectors.push(vector) }) },
+    });
+    expect(scheduler.runTick().deliveredInterrupt).toBe(0x76);
+    expect(vectors).toEqual([0x76]);
+    expect(trace.snapshot().filter((event) => event.source === "device")).toEqual([
+      expect.objectContaining({ kind: "storage", data: { kind: "ata.prefetch.ready", lba: 0 } }),
+    ]);
+    const phases = trace.snapshot().map((event) => `${event.source}:${event.kind}`);
+    expect(phases.indexOf("device:storage")).toBeLessThan(phases.indexOf("pic:dispatch"));
   });
 });

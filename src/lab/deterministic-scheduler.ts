@@ -27,7 +27,12 @@ export interface DeterministicInterruptDispatcher {
 }
 
 export interface DeterministicStoragePump {
-  pump(): readonly { readonly kind: string; readonly [key: string]: unknown }[];
+  pump(): readonly DeterministicStorageEvent[];
+}
+
+export interface DeterministicStorageEvent {
+  readonly kind: string;
+  readonly lba?: number;
 }
 
 export interface DeterministicSchedulerOptions {
@@ -83,7 +88,7 @@ export class DeterministicScheduler {
     const rtcInterrupts = this.peripherals.rtc?.advanceMilliseconds(rtcMilliseconds) ?? 0;
     if (this.peripherals.rtc) this.trace.record(currentTick, "device", "rtc", { milliseconds: rtcMilliseconds, generatedInterrupts: rtcInterrupts });
     for (const event of this.peripherals.storage?.pump() ?? []) {
-      this.trace.record(currentTick, "device", "storage", { kind: event.kind });
+      this.trace.record(currentTick, "device", "storage", event.lba === undefined ? { kind: event.kind } : { kind: event.kind, lba: event.lba });
     }
     const deliveredInterrupt = this.peripherals.interrupts?.dispatch() ?? null;
     if (deliveredInterrupt !== null) this.trace.record(currentTick, "pic", "dispatch", { vector: deliveredInterrupt });

@@ -4,7 +4,7 @@
  */
 import type { MemoryBus } from "./memory";
 import type { PortBus } from "./ports";
-import type { AtaPioDevice } from "./ata";
+import type { AtaPortDevice } from "./ata";
 import type { CmosRtc } from "./cmos";
 import type { DualPic8259 } from "./pic";
 import { Ps2Controller } from "./ps2";
@@ -222,7 +222,7 @@ export class DevicePortBus implements PortBus {
 
   constructor(
     private readonly strictUnsupportedPorts = false,
-    private readonly platform: { readonly pic?: DualPic8259; readonly cmos?: CmosRtc; readonly ata?: AtaPioDevice } = {},
+    private readonly platform: { readonly pic?: DualPic8259; readonly cmos?: CmosRtc; readonly ata?: AtaPortDevice } = {},
   ) {}
 
   enqueueKeyboardScanCode(code: number): void {
