@@ -49,6 +49,18 @@ describe("JustGo Core-16", () => {
     expect(core.state.sp).toBe(0xfffe);
   });
 
+  it("follows a BIOS reset vector through FAR JMP into a boot sector handoff", () => {
+    const { core, memory } = createCore();
+    memory.load(0xffff0, Uint8Array.from([0xea, 0x00, 0x01, 0x00, 0xf0]));
+    memory.load(physicalAddress(0xf000, 0x0100), Uint8Array.from([0xea, 0x00, 0x7c, 0x00, 0x00]));
+    memory.load(0x7c00, Uint8Array.from([0xb8, 0xef, 0xbe, 0xf4]));
+    core.reset({ cs: 0xf000, ip: 0xfff0, sp: 0xfffe });
+    expect(core.run().map((entry) => entry.mnemonic)).toEqual(["JMP ptr16:16", "JMP ptr16:16", "MOV AX, imm16", "HLT"]);
+    expect(core.state.ax).toBe(0xbeef);
+    expect(core.state.cs).toBe(0);
+    expect(core.state.ip).toBe(0x7c04);
+  });
+
   it("routes port I/O through the injected bus", () => {
     const { core, ports } = createCore();
     ports.setInput(0x66, 0xab);

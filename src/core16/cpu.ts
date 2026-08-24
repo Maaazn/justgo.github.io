@@ -232,6 +232,13 @@ export class Core16 {
       case 0xe9:
         this.relativeJump(signed16(this.fetch16()));
         return "JMP rel16";
+      case 0xea: {
+        const offset = this.fetch16();
+        const segment = this.fetch16();
+        this.state.cs = u16(segment);
+        this.state.ip = u16(offset);
+        return "JMP ptr16:16";
+      }
       case 0xeb:
         this.relativeJump(signed8(this.fetch8()));
         return "JMP rel8";
