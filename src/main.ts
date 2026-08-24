@@ -45,15 +45,19 @@ function escapeText(value: string): string {
 
 function selectedLaunchImage(): LocalImageDescriptor {
   const image = selectedImage();
-  if (image.source !== "user-provided" || !selectedLocalFile) return image;
+  if (!supportsLocalMedia(image) || !selectedLocalFile) return image;
   return { ...image, format: selectedLocalFormat, localFile: selectedLocalFile, label: `${image.label} — ${selectedLocalFile.name}` };
+}
+
+function supportsLocalMedia(image: LocalImageDescriptor): boolean {
+  return image.source === "user-provided" || image.id === "reactos-experimental";
 }
 
 function render(): void {
   const snapshot = session.snapshot;
   const image = selectedImage();
   const isRunning = snapshot.state === "running" || snapshot.state === "booting";
-  const bootable = (Boolean(image.imageUrl) || (image.source === "user-provided" && Boolean(selectedLocalFile))) && image.supportLevel !== "not-bundled";
+  const bootable = Boolean(image.imageUrl) || (supportsLocalMedia(image) && Boolean(selectedLocalFile));
   const inputDetail = runtime.inputProfile?.detail ?? "سيُكتشف أسلوب الماوس أو اللمس عند تشغيل الشاشة.";
 
   app.innerHTML = `
@@ -91,11 +95,11 @@ function render(): void {
               </button>
             `).join("")}
           </div>
-          ${image.source === "user-provided" ? `
+          ${supportsLocalMedia(image) ? `
             <label class="local-media-field">صورة محلية (ISO أو IMG)
               <input id="local-media" type="file" accept=".iso,.img,.raw,application/x-cd-image" ${isRunning ? "disabled" : ""}>
               <select id="local-format" ${isRunning ? "disabled" : ""}><option value="hard-disk" ${selectedLocalFormat === "hard-disk" ? "selected" : ""}>قرص صلب / IMG</option><option value="cdrom" ${selectedLocalFormat === "cdrom" ? "selected" : ""}>قرص مدمج / ISO</option></select>
-              <small>${selectedLocalFile ? `تم اختيار: ${escapeText(selectedLocalFile.name)} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
+              <small>${selectedLocalFile ? `تم اختيار: ${escapeText(selectedLocalFile.name)} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : image.id === "reactos-experimental" ? "للاختبار فقط: اختر ReactOS الرسمي محلياً. لا يُرفع أو يُحفظ أو يدخل إلى Git." : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
             </label>
           ` : ""}
           <div class="terms-note"><b>حدود صريحة:</b> FreeDOS هنا اختبار للمحرك فقط. ReactOS مفتوح المصدر لكنه Alpha. Windows 10 غير مدعوم أو مرفق حالياً.</div>
@@ -124,7 +128,7 @@ function render(): void {
           <div class="input-console"><span>INPUT MODE</span><p>${inputDetail}</p></div>
 
           <div class="workspace-actions">
-            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option></select></label>
+            <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}><option value="32">32 MiB</option><option value="64" selected>64 MiB</option><option value="128">128 MiB</option><option value="256">256 MiB</option><option value="512">512 MiB (اختبار)</option></select></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -153,6 +157,20 @@ function announce(next: SessionState, message: string, imageId?: string): void {
   render();
 }
 
+/** Keep the mounted v86 screen intact after boot; replacing app.innerHTML would destroy it. */
+function announceRunning(message: string): void {
+  session.transition("running", message);
+  const stateChip = document.querySelector<HTMLElement>(".state-chip");
+  if (stateChip) {
+    stateChip.className = "state-chip state-running";
+    stateChip.innerHTML = `<span></span>${stateLabels.running}`;
+  }
+  const status = document.querySelector<HTMLElement>(".session-console p");
+  if (status) status.textContent = message;
+  const inputStatus = document.querySelector<HTMLElement>(".input-console p");
+  if (inputStatus) inputStatus.textContent = runtime.inputProfile?.detail ?? "انقر داخل الشاشة لإرسال الإدخال.";
+}
+
 async function launch(): Promise<void> {
   const image = selectedLaunchImage();
   const memorySelect = document.querySelector<HTMLSelectElement>("#memory-select");
@@ -174,7 +192,7 @@ async function launch(): Promise<void> {
       },
       liveMount,
     );
-    announce("running", `المحرك المحلي جاهز. ${runtime.inputProfile?.detail ?? "انقر داخل الشاشة لإرسال الإدخال."}`);
+    announceRunning(`المحرك المحلي جاهز. ${runtime.inputProfile?.detail ?? "انقر داخل الشاشة لإرسال الإدخال."}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "حدث خطأ غير معروف أثناء تهيئة المحرك.";
     announce("failed", message);
@@ -199,6 +217,8 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       if (session.snapshot.state === "running" || session.snapshot.state === "booting") return;
       selectedImageId = button.dataset.imageId ?? selectedImageId;
+      selectedLocalFormat = selectedImage().format;
+      selectedLocalFile = undefined;
       session.reset("تم اختيار بيئة جديدة؛ لم تُحمّل أي صورة بعد.");
       render();
     });

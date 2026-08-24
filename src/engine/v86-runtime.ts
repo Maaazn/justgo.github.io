@@ -49,7 +49,7 @@ export class V86LocalRuntime implements RuntimeBridge {
     const screen = prepareScreen(mount);
     this.inputProfile = configureInputSurface(screen);
     const media: V86Image = image.localFile
-      ? { buffer: await image.localFile.arrayBuffer() }
+      ? ({ buffer: image.localFile, async: true } as unknown as V86Image)
       : { url: image.imageUrl! };
 
     await new Promise<void>((resolve, reject) => {
