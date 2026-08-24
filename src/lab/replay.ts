@@ -5,6 +5,13 @@ export interface ReplayInput {
   readonly kind: "keyboard" | "mouse";
 }
 
+export interface ReplayDeviceEvent {
+  readonly tick: number;
+  readonly source: "pic" | "device";
+  readonly kind: string;
+  readonly data: Readonly<Record<string, string | number | boolean>>;
+}
+
 export interface TraceDivergence {
   readonly index: number;
   readonly expected?: BootTraceEvent;
@@ -24,6 +31,20 @@ export function replayInputsFromTrace(events: readonly BootTraceEvent[]): readon
     inputs.push({ tick: event.tick, kind });
   }
   return inputs;
+}
+
+/** Extract deterministic PIC/RTC/storage events at the tick where they occurred. */
+export function replayDevicesFromTrace(events: readonly BootTraceEvent[]): readonly ReplayDeviceEvent[] {
+  let lastSequence = -1;
+  let lastTick = -1;
+  const devices: ReplayDeviceEvent[] = [];
+  for (const event of events) {
+    if (event.sequence !== lastSequence + 1 || event.tick < lastTick) throw new Error("سجل replay غير مرتب أو غير متصل.");
+    lastSequence = event.sequence; lastTick = event.tick;
+    if (event.source !== "pic" && event.source !== "device") continue;
+    devices.push({ tick: event.tick, source: event.source, kind: event.kind, data: { ...event.data } });
+  }
+  return devices;
 }
 
 export function firstTraceDivergence(expected: readonly BootTraceEvent[], actual: readonly BootTraceEvent[]): TraceDivergence | undefined {
