@@ -66,10 +66,11 @@ export function pushLongModeInterruptFrame(
   memory: LongModeAddressSpace,
   state: Cpu64State,
   gate: LongModeIdtGate,
-  options: { readonly returnRip: bigint; readonly errorCode?: number } = { returnRip: state.rip },
+  options: { readonly returnRip: bigint; readonly errorCode?: number; readonly stackPointer?: bigint } = { returnRip: state.rip },
 ): void {
   if (!gate.present) throw new LongModeIdtError(`بوابة IDT للمتجه ${gate.vector} غير present.`);
   if (gate.selector === 0) throw new LongModeIdtError(`بوابة IDT للمتجه ${gate.vector} لا تحتوي code selector صالحاً.`);
+  if (options.stackPointer !== undefined) state.rsp = options.stackPointer;
   const push = (value: bigint) => { state.rsp -= 8n; write64(memory, state.rsp, value); };
   push(state.rflags);
   push(BigInt(state.cs));

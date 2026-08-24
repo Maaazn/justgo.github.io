@@ -5,6 +5,7 @@ import { createLongModeControlState } from "../src/core64/control";
 import { Core64 } from "../src/core64/cpu";
 import { createExceptionFrame } from "../src/core64/exceptions";
 import { Core64IdtInterruptSink } from "../src/core64/pic-dispatch";
+import { createLongModeTss } from "../src/core64/tss";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
   for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
@@ -76,5 +77,17 @@ describe("JustGo Core-64 IDT delivery", () => {
     cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
     new Core64IdtInterruptSink(cpu).request(0x28);
     expect(cpu.state.rip).toBe(0x360n);
+  });
+
+  it("uses an IST stack from the loaded TSS before pushing an interrupt frame", () => {
+    const { cpu, memory } = createFixture();
+    const vector = 0x40;
+    writeGate(memory, 0x8000 + 0x400 + vector * 16, 0x380n, 0xe);
+    memory.write8(0x8000 + 0x400 + vector * 16 + 4, 1);
+    cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
+    cpu.loadTss(createLongModeTss({ ist: [0xa00n, 0n, 0n, 0n, 0n, 0n, 0n] }));
+    cpu.deliverInterrupt(vector);
+    expect(cpu.state.rsp).toBe(0xa00n - 24n);
+    expect(cpu.state.rip).toBe(0x380n);
   });
 });
