@@ -22,6 +22,10 @@ export interface DeterministicInterruptDispatcher {
   dispatch(): number | null;
 }
 
+export interface DeterministicStoragePump {
+  pump(): readonly { readonly kind: string; readonly [key: string]: unknown }[];
+}
+
 export interface DeterministicSchedulerOptions {
   readonly instructionsPerTick: number;
   readonly oscillatorTicksPerInstruction: number;
@@ -48,7 +52,7 @@ export class DeterministicScheduler {
     private readonly pit: ClockedDevice,
     readonly trace: BootTrace,
     private readonly options: DeterministicSchedulerOptions,
-    private readonly peripherals: { readonly input?: ScheduledInput; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
+    private readonly peripherals: { readonly input?: ScheduledInput; readonly storage?: DeterministicStoragePump; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
   ) {
     if (!Number.isInteger(options.instructionsPerTick) || options.instructionsPerTick <= 0) throw new Error("حصة تعليمات tick يجب أن تكون موجبة.");
     if (!Number.isInteger(options.oscillatorTicksPerInstruction) || options.oscillatorTicksPerInstruction < 0) throw new Error("نبضات PIT لكل تعليمة غير صالحة.");
@@ -69,6 +73,9 @@ export class DeterministicScheduler {
     const oscillatorTicks = executed * this.options.oscillatorTicksPerInstruction;
     const generatedInterrupts = this.pit.advanceOscillatorTicks(oscillatorTicks);
     this.trace.record(currentTick, "pit", "advance", { oscillatorTicks, generatedInterrupts });
+    for (const event of this.peripherals.storage?.pump() ?? []) {
+      this.trace.record(currentTick, "device", "storage", { kind: event.kind });
+    }
     const deliveredInterrupt = this.peripherals.interrupts?.dispatch() ?? null;
     if (deliveredInterrupt !== null) this.trace.record(currentTick, "pic", "dispatch", { vector: deliveredInterrupt });
     const frame = this.peripherals.framebuffer?.takeDirty();
