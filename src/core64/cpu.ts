@@ -135,6 +135,10 @@ export class Core64 {
       case 0x01: return this.executeRegisterAlu(rex, "add");
       case 0x29: return this.executeRegisterAlu(rex, "sub");
       case 0x39: return this.executeRegisterAlu(rex, "cmp");
+      case 0x21: return this.executeRegisterLogic(rex, "and");
+      case 0x09: return this.executeRegisterLogic(rex, "or");
+      case 0x31: return this.executeRegisterLogic(rex, "xor");
+      case 0x85: return this.executeRegisterLogic(rex, "test");
       default:
         throw new UnsupportedOpcodeError(opcode, Number(this.state.rip - 1n));
     }
@@ -243,6 +247,36 @@ export class Core64 {
       this.setFlag(FLAG_SIGN, (result & 0x8000_0000) !== 0);
     }
     return `${operation.toUpperCase()} ${operand.rm.toUpperCase()}, ${operand.reg.toUpperCase()}`;
+  }
+
+  private executeRegisterLogic(rex: ReturnType<typeof decodeRex>, operation: "and" | "or" | "xor" | "test"): string {
+    const modrm = this.fetch8();
+    const width64 = rex?.w ?? false;
+    if (((modrm >>> 6) & 3) !== 3) {
+      const operand = decodeModRmMemory64(modrm, rex, { read8: () => this.fetch8(), read32: () => this.fetch32(), rip: () => this.state.rip }, (register) => this.getRegister(register));
+      const left = this.readMemoryOperand(operand.address, width64);
+      const result = this.logicResult(left, this.getRegister(operand.reg), operation, width64);
+      this.applyLogicFlags(result, width64);
+      if (operation !== "test") this.writeMemoryOperand(operand.address, result, width64);
+      return `${operation.toUpperCase()} [${operand.address.toString(16)}], ${operand.reg.toUpperCase()}`;
+    }
+    const operand = decodeModRm64(modrm, rex, 0x21);
+    const result = this.logicResult(this.getRegister(operand.rm), this.getRegister(operand.reg), operation, width64);
+    this.applyLogicFlags(result, width64);
+    if (operation !== "test") this.writeOperand(operand.rm, result, width64);
+    return `${operation.toUpperCase()} ${operand.rm.toUpperCase()}, ${operand.reg.toUpperCase()}`;
+  }
+
+  private logicResult(left: bigint, right: bigint, operation: "and" | "or" | "xor" | "test", width64: boolean): bigint {
+    const value = operation === "and" || operation === "test" ? left & right : operation === "or" ? left | right : left ^ right;
+    return width64 ? u64(value) : BigInt(Number(value & 0xffff_ffffn) >>> 0);
+  }
+
+  private applyLogicFlags(value: bigint, width64: boolean): void {
+    this.setFlag(FLAG_CARRY, false);
+    this.setFlag(FLAG_OVERFLOW, false);
+    this.setFlag(FLAG_ZERO, value === 0n);
+    this.setFlag(FLAG_SIGN, width64 ? (value & (1n << 63n)) !== 0n : (value & 0x8000_0000n) !== 0n);
   }
 
   private applyAluFlags(result: Alu64Result): void {

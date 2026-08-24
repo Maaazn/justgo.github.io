@@ -120,4 +120,24 @@ describe("JustGo Core-64 narrow interpreter", () => {
     expect(cpu.state.rdx).toBe(0n);
     expect(cpu.state.rsp).toBe(0x780n);
   });
+
+  it("executes AND/OR/XOR/TEST and clears CF/OF before a conditional branch", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0xf0, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0xb9, 0x0f, 0, 0, 0, 0, 0, 0, 0,
+      0x48, 0x21, 0xc8,
+      0x48, 0x09, 0xc8,
+      0x48, 0x31, 0xc8,
+      0x48, 0x85, 0xc8,
+      0x74, 0x0a,
+      0x48, 0xba, 0xff, 0, 0, 0, 0, 0, 0, 0,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.rax).toBe(0n);
+    expect(cpu.state.rdx).toBe(0n);
+    expect(cpu.state.rflags & ((1n << 0n) | (1n << 11n))).toBe(0n);
+    expect(cpu.state.rflags & (1n << 6n)).toBe(1n << 6n);
+  });
 });
