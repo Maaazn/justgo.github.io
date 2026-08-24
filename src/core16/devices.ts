@@ -187,6 +187,8 @@ export class SectorDisk {
     this.bytes = new Uint8Array(sectors * sectorSize);
   }
 
+  get sectorCount(): number { return this.bytes.length / this.sectorSize; }
+
   readSector(index: number): Uint8Array {
     const start = this.offset(index);
     return this.bytes.slice(start, start + this.sectorSize);
