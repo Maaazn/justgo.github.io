@@ -87,4 +87,37 @@ describe("JustGo Core-64 narrow interpreter", () => {
     cpu.run();
     expect(cpu.state.rflags & (1n << 6n)).toBe(1n << 6n);
   });
+
+  it("executes CALL/RET and preserves a real guest return address on the PML4-mapped stack", () => {
+    const cpu = createCpu();
+    cpu.state.rsp = 0x700n;
+    cpu.loadProgram(new Uint8Array([
+      0xe8, 0x01, 0, 0, 0,
+      0xf4,
+      0x48, 0xb8, 0x4a, 0x47, 0, 0, 0, 0, 0, 0,
+      0xc3,
+    ]));
+    expect(cpu.run().map((entry) => entry.mnemonic)).toEqual(["CALL rel32", "MOV RAX, imm64", "RET", "HLT"]);
+    expect(cpu.state.rax).toBe(0x474an);
+    expect(cpu.state.rsp).toBe(0x700n);
+  });
+
+  it("executes PUSH/POP and takes JZ while leaving a non-taken JNZ traceable", () => {
+    const cpu = createCpu();
+    cpu.state.rsp = 0x780n;
+    cpu.loadProgram(new Uint8Array([
+      0x48, 0xb8, 0x5a, 0, 0, 0, 0, 0, 0, 0,
+      0x50,
+      0x5b,
+      0x48, 0x39, 0xdb,
+      0x74, 0x0a,
+      0x48, 0xba, 0xff, 0, 0, 0, 0, 0, 0, 0,
+      0x75, 0x00,
+      0xf4,
+    ]));
+    cpu.run();
+    expect(cpu.state.rbx).toBe(0x5an);
+    expect(cpu.state.rdx).toBe(0n);
+    expect(cpu.state.rsp).toBe(0x780n);
+  });
 });

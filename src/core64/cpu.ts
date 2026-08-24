@@ -73,6 +73,16 @@ export class Core64 {
   }
 
   private execute(opcode: number, rex: ReturnType<typeof decodeRex>): string {
+    if (opcode >= 0x50 && opcode <= 0x57) {
+      const register = register64(opcode - 0x50, rex?.b ?? false);
+      this.push64(this.getRegister(register));
+      return `PUSH ${register.toUpperCase()}`;
+    }
+    if (opcode >= 0x58 && opcode <= 0x5f) {
+      const register = register64(opcode - 0x58, rex?.b ?? false);
+      this.setRegister(register, this.pop64());
+      return `POP ${register.toUpperCase()}`;
+    }
     if (opcode >= 0xb8 && opcode <= 0xbf) {
       const destination = register64(opcode - 0xb8, rex?.b ?? false);
       if (rex?.w) this.setRegister(destination, this.fetch64());
@@ -87,6 +97,21 @@ export class Core64 {
       case 0xcf:
         popLongModeIretFrame(this.memory, this.state);
         return "IRETQ";
+      case 0xc3:
+        this.state.rip = this.pop64();
+        return "RET";
+      case 0xe8:
+        return this.executeCallRelative();
+      case 0xe9:
+        this.jumpRelative(signExtend32(this.fetch32()));
+        return "JMP rel32";
+      case 0xeb:
+        this.jumpRelative(this.fetchSigned8());
+        return "JMP rel8";
+      case 0x74:
+        return this.executeConditionalJump("JZ", this.flagIsSet(FLAG_ZERO));
+      case 0x75:
+        return this.executeConditionalJump("JNZ", !this.flagIsSet(FLAG_ZERO));
       case 0x05: {
         const immediate = this.fetch32();
         if (rex?.w) {
@@ -116,6 +141,7 @@ export class Core64 {
   }
 
   private fetch8(): number { const value = this.memory.read8(this.state.rip, "execute"); this.state.rip = u64(this.state.rip + 1n); return value; }
+  private fetchSigned8(): bigint { const value = this.fetch8(); return BigInt(value & 0x80 ? value - 0x100 : value); }
   private fetch32(): number { let value = 0; for (let byte = 0; byte < 4; byte += 1) value |= this.fetch8() << (byte * 8); return value >>> 0; }
   private fetch64(): bigint { let value = 0n; for (let byte = 0; byte < 8; byte += 1) value |= BigInt(this.fetch8()) << BigInt(byte * 8); return value; }
   private setRegister(register: Register64Name, value: bigint): void { this.state[register] = u64(value); }
@@ -152,6 +178,34 @@ export class Core64 {
   private writeMemoryOperand(address: bigint, value: bigint, width64: boolean): void {
     const bytes = width64 ? 8 : 4;
     for (let offset = 0; offset < bytes; offset += 1) this.memory.write8(address + BigInt(offset), Number((value >> BigInt(offset * 8)) & 0xffn));
+  }
+
+  private push64(value: bigint): void {
+    this.state.rsp = u64(this.state.rsp - 8n);
+    this.writeMemoryOperand(this.state.rsp, value, true);
+  }
+
+  private pop64(): bigint {
+    const value = this.readMemoryOperand(this.state.rsp, true);
+    this.state.rsp = u64(this.state.rsp + 8n);
+    return value;
+  }
+
+  private jumpRelative(displacement: bigint): void {
+    this.state.rip = u64(this.state.rip + displacement);
+  }
+
+  private executeCallRelative(): string {
+    const displacement = signExtend32(this.fetch32());
+    this.push64(this.state.rip);
+    this.jumpRelative(displacement);
+    return "CALL rel32";
+  }
+
+  private executeConditionalJump(mnemonic: "JZ" | "JNZ", condition: boolean): string {
+    const displacement = this.fetchSigned8();
+    if (condition) this.jumpRelative(displacement);
+    return `${mnemonic} rel8`;
   }
 
   private executeRegisterAlu(rex: ReturnType<typeof decodeRex>, operation: "add" | "sub" | "cmp"): string {
@@ -200,5 +254,9 @@ export class Core64 {
 
   private setFlag(flag: bigint, enabled: boolean): void {
     this.state.rflags = enabled ? this.state.rflags | flag : this.state.rflags & ~flag;
+  }
+
+  private flagIsSet(flag: bigint): boolean {
+    return (this.state.rflags & flag) !== 0n;
   }
 }
