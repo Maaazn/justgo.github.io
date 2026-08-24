@@ -6,6 +6,12 @@ import { Core64 } from "../src/core64/cpu";
 import { createExceptionFrame } from "../src/core64/exceptions";
 import { Core64IdtInterruptSink } from "../src/core64/pic-dispatch";
 import { createLongModeTss } from "../src/core64/tss";
+import { CmosRtc } from "../src/core16/cmos";
+import { ProgrammableIntervalTimer } from "../src/core16/devices";
+import { DualPic8259, PicIrqLineSink } from "../src/core16/pic";
+import { ScheduledAtaPioDevice, type AsyncAtaBlockMedia } from "../src/core16/ata";
+import { BootTrace } from "../src/lab/boot-trace";
+import { DeterministicScheduler, type ScheduledCpu } from "../src/lab/deterministic-scheduler";
 import { CORE64_EXCEPTION_CORPUS } from "../src/lab/execution-corpus";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
@@ -36,6 +42,14 @@ function createFixture(): { cpu: Core64; space: LongModeAddressSpace; memory: Li
   write64(memory, 0x3000, 0x4003n); write64(memory, 0x4000, 0x8003n);
   const space = new LongModeAddressSpace(memory, createLongModeControlState({ cr3: 0x1000n }));
   return { cpu: new Core64(space, { rsp: 0x900n, rip: 0x123n, rflags: 0x202n }), space, memory };
+}
+
+class ReadyAtaMedia implements AsyncAtaBlockMedia {
+  readonly sectorSize = 512;
+  readonly sectorCount = 1;
+  private cached = false;
+  async prefetch(): Promise<Uint8Array> { this.cached = true; return new Uint8Array(512); }
+  readSector(): Uint8Array { if (!this.cached) throw new Error("ATA sector was not prefetched"); return new Uint8Array(512); }
 }
 
 describe("JustGo Core-64 IDT delivery", () => {
@@ -78,6 +92,66 @@ describe("JustGo Core-64 IDT delivery", () => {
     cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
     new Core64IdtInterruptSink(cpu).request(0x28);
     expect(cpu.state.rip).toBe(0x360n);
+  });
+
+  it("delivers scheduled PIT IRQ0 and RTC IRQ8 through PIC into Core-64 IDT gates", () => {
+    const { cpu, memory } = createFixture();
+    writeGate(memory, 0x8000 + 0x400 + 0x20 * 16, 0x300n, 0xe);
+    writeGate(memory, 0x8000 + 0x400 + 0x70 * 16, 0x320n, 0xe);
+    memory.write8(0x8000 + 0x300, 0xcf); memory.write8(0x8000 + 0x320, 0xcf);
+    cpu.loadIdtr({ base: 0x400n, limit: 0x7ff }); cpu.loadProgram(new Uint8Array([0x90]));
+    const pic = new DualPic8259();
+    pic.out8(0x21, 0); pic.out8(0xa1, 0);
+    pic.out8(0x20, 0x11); pic.out8(0x21, 0x20); pic.out8(0x21, 0x04); pic.out8(0x21, 0x01);
+    pic.out8(0xa0, 0x11); pic.out8(0xa1, 0x70); pic.out8(0xa1, 0x02); pic.out8(0xa1, 0x01);
+    const pit = new ProgrammableIntervalTimer(new PicIrqLineSink(pic, 0)); pit.configureDivisor(1);
+    const rtc = new CmosRtc(new PicIrqLineSink(pic, 8));
+    const scheduledCpu: ScheduledCpu = {
+      state: cpu.state,
+      step: () => {
+        const instruction = cpu.step();
+        return { ...instruction, address: Number(instruction.address) };
+      },
+    };
+    const trace = new BootTrace(); const delivered: number[] = [];
+    const scheduler = new DeterministicScheduler(scheduledCpu, pit, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 1, millisecondsPerTick: 1000 }, {
+      rtc,
+      interrupts: { dispatch: () => pic.dispatch({ request: (vector) => { delivered.push(vector); new Core64IdtInterruptSink(cpu).request(vector); } }) },
+    });
+    expect(scheduler.runTick().deliveredInterrupt).toBe(0x20);
+    expect(cpu.state.rip).toBe(0x300n);
+    pic.out8(0x20, 0x20); pit.configureDivisor(0xffff);
+    expect(scheduler.runTick().deliveredInterrupt).toBe(0x70);
+    expect(cpu.state.rip).toBe(0x320n);
+    pic.out8(0xa0, 0x20); pic.out8(0x20, 0x20);
+    expect(delivered).toEqual([0x20, 0x70]);
+    expect(pic.snapshot().slave.isr).toBe(0);
+    expect(trace.snapshot().filter((event) => event.source === "pic").map((event) => event.data.vector)).toEqual([0x20, 0x70]);
+  });
+
+  it("delivers a scheduler-completed local ATA IRQ14 through PIC into a Core-64 IDT gate", async () => {
+    const { cpu, memory } = createFixture();
+    writeGate(memory, 0x8000 + 0x400 + 0x76 * 16, 0x340n, 0xe);
+    cpu.loadIdtr({ base: 0x400n, limit: 0x7ff }); cpu.loadProgram(new Uint8Array([0x90]));
+    const pic = new DualPic8259();
+    pic.out8(0x21, 0); pic.out8(0xa1, 0);
+    pic.out8(0x20, 0x11); pic.out8(0x21, 0x20); pic.out8(0x21, 0x04); pic.out8(0x21, 0x01);
+    pic.out8(0xa0, 0x11); pic.out8(0xa1, 0x70); pic.out8(0xa1, 0x02); pic.out8(0xa1, 0x01);
+    const ata = new ScheduledAtaPioDevice(new ReadyAtaMedia(), new PicIrqLineSink(pic, 14));
+    ata.out8(0x1f2, 1); ata.out8(0x1f3, 0); ata.out8(0x1f6, 0xe0); ata.out8(0x1f7, 0x20);
+    await Promise.resolve();
+    const scheduledCpu: ScheduledCpu = { state: cpu.state, step: () => {
+      const instruction = cpu.step(); return { ...instruction, address: Number(instruction.address) };
+    } };
+    const trace = new BootTrace(); const delivered: number[] = [];
+    new DeterministicScheduler(scheduledCpu, { advanceOscillatorTicks: () => 0 }, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 0 }, {
+      storage: ata,
+      interrupts: { dispatch: () => pic.dispatch({ request: (vector) => { delivered.push(vector); new Core64IdtInterruptSink(cpu).request(vector); } }) },
+    }).runTick();
+    expect(delivered).toEqual([0x76]);
+    expect(cpu.state.rip).toBe(0x340n);
+    expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toContain("device:storage");
+    expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`).indexOf("device:storage")).toBeLessThan(trace.snapshot().map((event) => `${event.source}:${event.kind}`).indexOf("pic:dispatch"));
   });
 
   it("uses an IST stack from the loaded TSS before pushing an interrupt frame", () => {
