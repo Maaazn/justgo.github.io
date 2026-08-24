@@ -112,6 +112,8 @@ export class Core64 {
         return this.executeConditionalJump("JZ", this.flagIsSet(FLAG_ZERO));
       case 0x75:
         return this.executeConditionalJump("JNZ", !this.flagIsSet(FLAG_ZERO));
+      case 0x0f:
+        return this.executeExtendedOpcode();
       case 0x05: {
         const immediate = this.fetch32();
         if (rex?.w) {
@@ -187,6 +189,31 @@ export class Core64 {
     const immediate = width64 ? signExtend32(this.fetch32()) : BigInt(this.fetch32());
     this.writeOperand(operand.rm, immediate, width64);
     return `MOV ${operand.rm.toUpperCase()}, imm${width64 ? "32" : "32"}`;
+  }
+
+  private executeExtendedOpcode(): string {
+    const extended = this.fetch8();
+    if (extended !== 0xa2) throw new UnsupportedOpcodeError((0x0f << 8) | extended, Number(this.state.rip - 2n));
+    const leaf = Number(this.state.rax & 0xffff_ffffn) >>> 0;
+    if (leaf === 0) {
+      this.state.rax = 1n;
+      this.state.rbx = 0x7473_754an; // "Just"
+      this.state.rdx = 0x5043_6f47n; // "GoCP"
+      this.state.rcx = 0x0034_3655n; // "U64\0"
+    } else if (leaf === 1) {
+      // A conservative family/model identity with no feature flags advertised.
+      // Do not expose host capabilities that the interpreter has not implemented.
+      this.state.rax = 0x0000_0600n;
+      this.state.rbx = 0n;
+      this.state.rcx = 0n;
+      this.state.rdx = 0n;
+    } else {
+      this.state.rax = 0n;
+      this.state.rbx = 0n;
+      this.state.rcx = 0n;
+      this.state.rdx = 0n;
+    }
+    return "CPUID";
   }
 
   private readMemoryOperand(address: bigint, width64: boolean): bigint {

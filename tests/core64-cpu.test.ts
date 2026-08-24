@@ -154,4 +154,18 @@ describe("JustGo Core-64 narrow interpreter", () => {
     expect(cpu.state.rdx).toBe(0xffff_ffff_ffff_ffffn);
     expect(cpu.state.rbx).toBe(0x1234_5678n);
   });
+
+  it("reports a deterministic conservative CPUID identity without exposing unsupported host features", () => {
+    const cpu = createCpu();
+    cpu.loadProgram(new Uint8Array([0xb8, 0, 0, 0, 0, 0x0f, 0xa2, 0xf4]));
+    expect(cpu.run().map((entry) => entry.mnemonic)).toEqual(["MOV RAX, imm32", "CPUID", "HLT"]);
+    expect(cpu.state.rax).toBe(1n);
+    expect(cpu.state.rbx).toBe(0x7473_754an);
+    expect(cpu.state.rdx).toBe(0x5043_6f47n);
+    expect(cpu.state.rcx).toBe(0x0034_3655n);
+
+    cpu.loadProgram(new Uint8Array([0xb8, 1, 0, 0, 0, 0x0f, 0xa2, 0xf4]));
+    cpu.run();
+    expect(cpu.state.rdx).toBe(0n);
+  });
 });
