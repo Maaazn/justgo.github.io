@@ -87,4 +87,19 @@ describe("JustGo deterministic scheduler", () => {
     expect(vectors).toEqual([0x08]);
     expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual(["scheduler:tick.begin", "cpu:instruction", "pit:advance", "pic:dispatch", "video:frame.ready", "scheduler:tick.end"]);
   });
+
+  it("runs RTC and storage phases before PIC dispatch in a reproducible order", () => {
+    const cpu: ScheduledCpu = { state: { halted: false, steps: 0 }, step: () => ({ address: 0, opcode: 0x90, mnemonic: "NOP" }) };
+    const trace = new BootTrace();
+    new DeterministicScheduler(
+      cpu,
+      { advanceOscillatorTicks: () => 0 },
+      trace,
+      { instructionsPerTick: 1, oscillatorTicksPerInstruction: 0, millisecondsPerTick: 1000 },
+      { rtc: { advanceMilliseconds: () => 1 }, storage: { pump: () => [{ kind: "ata.prefetch.ready" }] }, interrupts: { dispatch: () => 0x76 } },
+    ).runTick();
+    expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual([
+      "scheduler:tick.begin", "cpu:instruction", "pit:advance", "device:rtc", "device:storage", "pic:dispatch", "video:frame.ready", "scheduler:tick.end",
+    ]);
+  });
 });
