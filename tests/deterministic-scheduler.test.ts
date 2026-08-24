@@ -3,6 +3,7 @@ import { Core16 } from "../src/core16/cpu";
 import { ProgrammableIntervalTimer, DevicePortBus } from "../src/core16/devices";
 import { InterruptQueue } from "../src/core16/interrupts";
 import { LinearMemory } from "../src/core16/memory";
+import { DualPic8259, PicIrqLineSink } from "../src/core16/pic";
 import { Ps2Controller } from "../src/core16/ps2";
 import { BootTrace } from "../src/lab/boot-trace";
 import { DeterministicPs2Input } from "../src/lab/deterministic-input";
@@ -71,5 +72,19 @@ describe("JustGo deterministic scheduler", () => {
     input.enqueue({ kind: "keyboard", scanCode: 0x1c });
     new DeterministicScheduler(cpu, { advanceOscillatorTicks: () => 0 }, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 0 }, { input }).runTick();
     expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual(["scheduler:tick.begin", "ps2:input", "cpu:instruction", "pit:advance", "video:frame.ready", "scheduler:tick.end"]);
+  });
+
+  it("routes a PIT edge through PIC after the clock phase in a reproducible tick", () => {
+    const cpu: ScheduledCpu = { state: { halted: false, steps: 0 }, step: () => ({ address: 0, opcode: 0x90, mnemonic: "NOP" }) };
+    const pic = new DualPic8259();
+    const vectors: number[] = [];
+    const pit = new ProgrammableIntervalTimer(new PicIrqLineSink(pic, 0));
+    pit.configureDivisor(1);
+    const trace = new BootTrace();
+    const scheduler = new DeterministicScheduler(cpu, pit, trace, { instructionsPerTick: 1, oscillatorTicksPerInstruction: 1 }, { interrupts: { dispatch: () => pic.dispatch({ request: (vector) => vectors.push(vector) }) } });
+    const result = scheduler.runTick();
+    expect(result.deliveredInterrupt).toBe(0x08);
+    expect(vectors).toEqual([0x08]);
+    expect(trace.snapshot().map((event) => `${event.source}:${event.kind}`)).toEqual(["scheduler:tick.begin", "cpu:instruction", "pit:advance", "pic:dispatch", "video:frame.ready", "scheduler:tick.end"]);
   });
 });

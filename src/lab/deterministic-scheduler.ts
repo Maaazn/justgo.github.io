@@ -18,6 +18,10 @@ export interface DirtyFramebuffer {
   takeDirty(): { readonly dirty: boolean; readonly revision: number };
 }
 
+export interface DeterministicInterruptDispatcher {
+  dispatch(): number | null;
+}
+
 export interface DeterministicSchedulerOptions {
   readonly instructionsPerTick: number;
   readonly oscillatorTicksPerInstruction: number;
@@ -27,6 +31,7 @@ export interface TickResult {
   readonly tick: number;
   readonly executedInstructions: number;
   readonly generatedInterrupts: number;
+  readonly deliveredInterrupt: number | null;
   readonly halted: boolean;
 }
 
@@ -43,7 +48,7 @@ export class DeterministicScheduler {
     private readonly pit: ClockedDevice,
     readonly trace: BootTrace,
     private readonly options: DeterministicSchedulerOptions,
-    private readonly peripherals: { readonly input?: ScheduledInput; readonly framebuffer?: DirtyFramebuffer } = {},
+    private readonly peripherals: { readonly input?: ScheduledInput; readonly interrupts?: DeterministicInterruptDispatcher; readonly framebuffer?: DirtyFramebuffer } = {},
   ) {
     if (!Number.isInteger(options.instructionsPerTick) || options.instructionsPerTick <= 0) throw new Error("حصة تعليمات tick يجب أن تكون موجبة.");
     if (!Number.isInteger(options.oscillatorTicksPerInstruction) || options.oscillatorTicksPerInstruction < 0) throw new Error("نبضات PIT لكل تعليمة غير صالحة.");
@@ -64,9 +69,11 @@ export class DeterministicScheduler {
     const oscillatorTicks = executed * this.options.oscillatorTicksPerInstruction;
     const generatedInterrupts = this.pit.advanceOscillatorTicks(oscillatorTicks);
     this.trace.record(currentTick, "pit", "advance", { oscillatorTicks, generatedInterrupts });
+    const deliveredInterrupt = this.peripherals.interrupts?.dispatch() ?? null;
+    if (deliveredInterrupt !== null) this.trace.record(currentTick, "pic", "dispatch", { vector: deliveredInterrupt });
     const frame = this.peripherals.framebuffer?.takeDirty();
     this.trace.record(currentTick, "video", "frame.ready", { guestSteps: this.cpu.state.steps, dirty: frame?.dirty ?? false, revision: frame?.revision ?? 0 });
     this.trace.record(currentTick, "scheduler", "tick.end", { executed, halted: this.cpu.state.halted });
-    return { tick: currentTick, executedInstructions: executed, generatedInterrupts, halted: this.cpu.state.halted };
+    return { tick: currentTick, executedInstructions: executed, generatedInterrupts, deliveredInterrupt, halted: this.cpu.state.halted };
   }
 }

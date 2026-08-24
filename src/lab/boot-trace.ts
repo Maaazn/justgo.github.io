@@ -1,4 +1,4 @@
-export type TraceSource = "cpu" | "pit" | "ps2" | "video" | "memory" | "renderer" | "scheduler";
+export type TraceSource = "cpu" | "pit" | "pic" | "ps2" | "video" | "memory" | "renderer" | "scheduler";
 
 export interface BootTraceEvent {
   readonly tick: number;

@@ -140,3 +140,9 @@ export class DualPic8259 {
     return { master: this.master.snapshot(), slave: this.slave.snapshot() };
   }
 }
+
+/** Adapts an IRQ-producing hardware device to the legacy interrupt sink shape. */
+export class PicIrqLineSink implements InterruptSink {
+  constructor(private readonly pic: DualPic8259, private readonly irq: number) {}
+  request(_vector: number): void { this.pic.requestIrq(this.irq); }
+}
