@@ -69,6 +69,7 @@ export class V86LocalRuntime implements RuntimeBridge {
         vga_memory_size: 8 * 1024 * 1024,
         bios: { url: V86_BIOS_URL },
         vga_bios: { url: V86_VGA_BIOS_URL },
+        acpi: request.acpiExperimental,
         ...(image.format === "cdrom" ? { cdrom: media } : { hda: media }),
         screen: {
           container: screen,

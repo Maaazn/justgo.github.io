@@ -31,6 +31,7 @@ let selectedLocalFile: File | undefined;
 let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
 let selectedMemoryMiB: GuestMemoryMiB = 64;
 let selectedDisplayId: DisplayPresetId = "xga";
+let enableAcpiExperimental = true;
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("لم يتم العثور على جذر تطبيق JustGo.");
@@ -138,6 +139,7 @@ function render(): void {
           <div class="workspace-actions">
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
             <label class="memory-field">هدف دقة العرض <select id="display-select" ${isRunning ? "disabled" : ""}>${DISPLAY_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === selectedDisplay.id ? "selected" : ""}>${preset.label}</option>`).join("")}</select><small>يضبط سطح العرض؛ وضع VGA الحقيقي يختاره نظام الضيف.</small></label>
+            <label class="memory-field"><input id="acpi-toggle" type="checkbox" ${enableAcpiExperimental ? "checked" : ""} ${isRunning ? "disabled" : ""}> ACPI تجريبي<small>مفعّل لمسار Windows Boot Manager؛ يعتمد على دعم v86 التجريبي.</small></label>
             <label class="key-field">مفتاح Windows (اختياري)
               <input id="windows-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="29" value="${escapeAttribute(localWindowsKey)}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" ${isRunning ? "disabled" : ""}>
               <small>يبقى في ذاكرة هذه الصفحة فقط؛ لا يُرسل أو يُحفظ ولا يغيّر تجربة المحرك الحالية.</small>
@@ -203,6 +205,7 @@ async function launch(): Promise<void> {
       {
         image,
         viewport: { width: selectedDisplay.width, height: selectedDisplay.height, memoryMiB: selectedMemoryMiB },
+        acpiExperimental: enableAcpiExperimental,
         persistState: false,
       },
       liveMount,
@@ -249,6 +252,10 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLSelectElement>("#display-select")?.addEventListener("change", (event) => {
     selectedDisplayId = (event.currentTarget as HTMLSelectElement).value as DisplayPresetId;
+    render();
+  });
+  document.querySelector<HTMLInputElement>("#acpi-toggle")?.addEventListener("change", (event) => {
+    enableAcpiExperimental = (event.currentTarget as HTMLInputElement).checked;
     render();
   });
   document.querySelector<HTMLInputElement>("#local-media")?.addEventListener("change", (event) => {

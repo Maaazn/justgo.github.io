@@ -15,4 +15,4 @@ Info: Windows failed to load because the firmware (BIOS) is not ACPI compatible.
 
 ## الأثر الهندسي
 
-المسار التالي هو فحص حدود ACPI في firmware والمحرك المستخدم، وليس تغيير نوع الوسيط أو زيادة ذاكرة الضيف. لا تُضمّن صورة Windows أو مفتاح أو لقطة المستخدم في المستودع أو GitHub Pages.
+المسار التالي هو فحص حدود ACPI في firmware والمحرك المستخدم، وليس تغيير نوع الوسيط أو زيادة ذاكرة الضيف. يوفر v86 خيار `acpi` تجريبياً في عقده وفي صفحة debug الخاصة به؛ أضيف الخيار إلى جلسة JustGo ويُفعّل افتراضياً لمسار Windows Boot Manager. لا تُضمّن صورة Windows أو مفتاح أو لقطة المستخدم في المستودع أو GitHub Pages.
