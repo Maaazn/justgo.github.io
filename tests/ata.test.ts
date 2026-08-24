@@ -26,6 +26,13 @@ class DeferredAtaMedia implements AsyncAtaBlockMedia {
   complete(): void { this.resolve?.(); }
 }
 
+class RejectingAtaMedia implements AsyncAtaBlockMedia {
+  readonly sectorSize = 512;
+  readonly sectorCount = 1;
+  async prefetch(): Promise<Uint8Array> { throw new Error("local read failed"); }
+  readSector(): Uint8Array { throw new Error("no cached sector after failed prefetch"); }
+}
+
 describe("JustGo ATA PIO primary device", () => {
   it("serves an LBA28 sector through the DRQ data FIFO and signals IRQ14", () => {
     const disk = new SectorDisk(2); const sector = new Uint8Array(512); sector[0] = 0x34; sector[1] = 0x12; sector[511] = 0xfe; disk.writeSector(1, sector);
@@ -69,5 +76,15 @@ describe("JustGo ATA PIO primary device", () => {
     for (let index = 1; index < 512; index += 1) ata.in8(0x1f0);
     expect(vectors).toEqual([0x76, 0x76]);
     expect(media.prefetches).toEqual([0]);
+  });
+
+  it("reports a local prefetch failure from the storage phase without exposing DRQ", async () => {
+    const vectors: number[] = []; const ata = new ScheduledAtaPioDevice(new RejectingAtaMedia(), { request: (vector) => vectors.push(vector) });
+    ata.out8(0x1f2, 1); ata.out8(0x1f3, 0); ata.out8(0x1f6, 0xe0); ata.out8(0x1f7, 0x20);
+    await Promise.resolve();
+    expect(ata.pump()).toEqual([{ kind: "ata.prefetch.error", lba: 0 }]);
+    expect(ata.in8(0x1f7) & ScheduledAtaPioDevice.STATUS_ERR).toBe(ScheduledAtaPioDevice.STATUS_ERR);
+    expect(ata.in8(0x1f7) & ScheduledAtaPioDevice.STATUS_DRQ).toBe(0);
+    expect(vectors).toEqual([0x76]);
   });
 });
