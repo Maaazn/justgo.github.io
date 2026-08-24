@@ -6,6 +6,7 @@ import { Core64 } from "../src/core64/cpu";
 import { createExceptionFrame } from "../src/core64/exceptions";
 import { Core64IdtInterruptSink } from "../src/core64/pic-dispatch";
 import { createLongModeTss } from "../src/core64/tss";
+import { CORE64_EXCEPTION_CORPUS } from "../src/lab/execution-corpus";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
   for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
@@ -57,18 +58,18 @@ describe("JustGo Core-64 IDT delivery", () => {
 
   it("pushes an exception error code ahead of RIP, CS and RFLAGS", () => {
     const { cpu, space, memory } = createFixture();
-    const vector = 14;
-    writeGate(memory, 0x8000 + 0x400 + vector * 16, 0x310n, 0xf);
+    const scenario = CORE64_EXCEPTION_CORPUS[0]!;
+    writeGate(memory, 0x8000 + 0x400 + scenario.vector * 16, scenario.expectedHandler, 0xf);
     cpu.loadIdtr({ base: 0x400n, limit: 0x7ff });
-    cpu.deliverException(createExceptionFrame("page-fault", 0x123n, { errorCode: 0x2, faultAddress: 0xdeadn }));
+    cpu.deliverException(createExceptionFrame("page-fault", 0x123n, { errorCode: scenario.errorCode, faultAddress: scenario.faultAddress }));
 
-    expect(cpu.state.rip).toBe(0x310n);
+    expect(cpu.state.rip).toBe(scenario.expectedHandler);
     expect(cpu.state.rflags & (1n << 9n)).toBe(1n << 9n);
-    expect(cpu.state.rsp).toBe(0x8e0n);
-    expect(read64(space, 0x8e0n)).toBe(0x2n);
-    expect(read64(space, 0x8e8n)).toBe(0x123n);
-    expect(read64(space, 0x8f0n)).toBe(0x8n);
-    expect(read64(space, 0x8f8n)).toBe(0x202n);
+    expect(cpu.state.rsp).toBe(scenario.expectedStackPointer);
+    expect(read64(space, scenario.expectedStackPointer)).toBe(BigInt(scenario.errorCode));
+    expect(read64(space, scenario.expectedStackPointer + 8n)).toBe(0x123n);
+    expect(read64(space, scenario.expectedStackPointer + 16n)).toBe(0x8n);
+    expect(read64(space, scenario.expectedStackPointer + 24n)).toBe(0x202n);
   });
 
   it("bridges a platform PIC vector into the configured guest IDT", () => {
