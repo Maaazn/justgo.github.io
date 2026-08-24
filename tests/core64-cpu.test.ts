@@ -3,6 +3,7 @@ import { LinearMemory } from "../src/core16/memory";
 import { LongModeAddressSpace } from "../src/core64/address-space";
 import { createLongModeControlState } from "../src/core64/control";
 import { Core64 } from "../src/core64/cpu";
+import { CORE64_MEMORY_ALU_CORPUS } from "../src/lab/execution-corpus";
 
 function write64(memory: LinearMemory, address: number, value: bigint): void {
   for (let byte = 0; byte < 8; byte += 1) memory.write8(address + byte, Number((value >> BigInt(byte * 8)) & 0xffn));
@@ -61,6 +62,14 @@ describe("JustGo Core-64 narrow interpreter", () => {
     ]));
     cpu.run();
     expect(cpu.state.rdx).toBe(0x1122_3344_5566_7788n);
+  });
+
+  it("runs a named PML4 guest program from the execution corpus", () => {
+    const sample = CORE64_MEMORY_ALU_CORPUS[0];
+    const cpu = createCpu();
+    cpu.loadProgram(sample.bytes);
+    cpu.run();
+    expect(cpu.state[sample.expected.register]).toBe(sample.expected.value);
   });
 
   it("executes ADD and CMP against a PML4-translated memory operand", () => {
