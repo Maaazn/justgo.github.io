@@ -11,6 +11,7 @@ import { detectMemoryEnvironment, memoryLaunchMessage, memoryOptions, type Guest
 import { inferLocalMediaFormat, localMediaFormatMessage } from "./engine/local-media-format";
 import { DISPLAY_PRESETS, displayPreset, type DisplayPresetId } from "./engine/display-presets";
 import { clearRecoveryMedium, loadRecoveryMedium, loadRecoverySettings, requestPersistentRecoveryStorage, saveRecoveryMedium, saveRecoverySettings } from "./engine/session-recovery";
+import { VIRTUAL_DISK_OPTIONS, type VirtualDiskGiB } from "./engine/sparse-guest-disk";
 
 const stateLabels: Record<SessionState, string> = {
   idle: "جاهز",
@@ -32,6 +33,7 @@ let selectedLocalFile: File | undefined;
 let selectedLocalFormat: "hard-disk" | "cdrom" = "hard-disk";
 let selectedMemoryMiB: GuestMemoryMiB = 64;
 let selectedDisplayId: DisplayPresetId = "xga";
+let selectedVirtualDiskGiB: VirtualDiskGiB = 32;
 let enableAcpiExperimental = true;
 let retainLocalMedium = true;
 let recoveryNote = "تُحفظ الإعدادات محلياً؛ لا يُحفظ RAM أو يُرفع أي ملف.";
@@ -64,7 +66,7 @@ function supportsLocalMedia(image: LocalImageDescriptor): boolean {
 
 function persistRecovery(): void {
   try {
-    saveRecoverySettings({ imageId: selectedImageId, localFormat: selectedLocalFormat, memoryMiB: selectedMemoryMiB, displayId: selectedDisplayId, acpiExperimental: enableAcpiExperimental, retainLocalMedium });
+    saveRecoverySettings({ imageId: selectedImageId, localFormat: selectedLocalFormat, memoryMiB: selectedMemoryMiB, displayId: selectedDisplayId, virtualDiskGiB: selectedVirtualDiskGiB, acpiExperimental: enableAcpiExperimental, retainLocalMedium });
   } catch {
     recoveryNote = "تعذر حفظ إعدادات الاستعادة محلياً في هذا المتصفح.";
   }
@@ -89,6 +91,7 @@ async function restoreRecovery(): Promise<void> {
   selectedLocalFormat = saved.localFormat;
   selectedMemoryMiB = saved.memoryMiB;
   selectedDisplayId = saved.displayId;
+  selectedVirtualDiskGiB = saved.virtualDiskGiB;
   enableAcpiExperimental = saved.acpiExperimental;
   retainLocalMedium = saved.retainLocalMedium;
   if (retainLocalMedium) {
@@ -153,7 +156,7 @@ function render(): void {
             <label class="local-media-field">صورة محلية (ISO أو IMG)
               <input id="local-media" type="file" accept=".iso,.img,.raw,application/x-cd-image" ${isRunning ? "disabled" : ""}>
               <select id="local-format" ${isRunning ? "disabled" : ""}><option value="hard-disk" ${selectedLocalFormat === "hard-disk" ? "selected" : ""} ${isoSelected ? "disabled" : ""}>قرص صلب / IMG</option><option value="cdrom" ${selectedLocalFormat === "cdrom" ? "selected" : ""}>قرص مدمج / ISO</option></select>
-              <small>${selectedLocalFile ? `${escapeText(localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat))} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). يبقى على جهازك.` : image.id === "reactos-experimental" ? "للاختبار فقط: اختر ReactOS الرسمي محلياً. لا يُرفع أو يُحفظ أو يدخل إلى Git." : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
+              <small>${selectedLocalFile ? `${escapeText(localMediaFormatMessage(selectedLocalFile.name, selectedLocalFormat))} (${Math.ceil(selectedLocalFile.size / (1024 * 1024))} MiB). عند ISO يربط JustGo قرص ATA sparse قابل للكتابة تلقائياً. يبقى كل شيء على جهازك.` : image.id === "reactos-experimental" ? "للاختبار فقط: اختر ReactOS الرسمي محلياً. لا يُرفع أو يُحفظ أو يدخل إلى Git." : "اختر ملفاً تملك حق استخدامه. لا يُرفع أو يُحفظ أو يدخل إلى Git."}</small>
             </label>
           ` : ""}
           <div class="terms-note"><b>حدود صريحة:</b> FreeDOS هنا اختبار للمحرك فقط. ReactOS مفتوح المصدر لكنه Alpha. Windows 10 غير مدعوم أو مرفق حالياً.</div>
@@ -182,6 +185,7 @@ function render(): void {
           <div class="input-console"><span>INPUT MODE</span><p>${inputDetail}</p></div>
 
           <div class="workspace-actions">
+            <label class="memory-field">قرص تثبيت ATA <select id="virtual-disk-select" ${isRunning ? "disabled" : ""}>${VIRTUAL_DISK_OPTIONS.map((option) => `<option value="${option.giB}" ${option.giB === selectedVirtualDiskGiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>عند ISO: يظهر للضيف كقرص قابل للتقسيم؛ لا يحجز سعته كاملة.</small></label>
             <label class="memory-field">ذاكرة المحرك <select id="memory-select" ${isRunning ? "disabled" : ""}>${availableMemory.map((option) => `<option value="${option.miB}" ${option.miB === selectedMemoryMiB ? "selected" : ""}>${option.label}</option>`).join("")}</select><small>${availableMemory.find((option) => option.miB === selectedMemoryMiB)?.note ?? "الذاكرة تحجز محلياً داخل المتصفح."}</small></label>
             <label class="memory-field">هدف دقة العرض <select id="display-select" ${isRunning ? "disabled" : ""}>${DISPLAY_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === selectedDisplay.id ? "selected" : ""}>${preset.label}</option>`).join("")}</select><small>يضبط سطح العرض؛ وضع VGA الحقيقي يختاره نظام الضيف.</small></label>
             <label class="memory-field"><input id="acpi-toggle" type="checkbox" ${enableAcpiExperimental ? "checked" : ""} ${isRunning ? "disabled" : ""}> ACPI تجريبي<small>مفعّل لمسار Windows Boot Manager؛ يعتمد على دعم v86 التجريبي.</small></label>
@@ -252,6 +256,7 @@ async function launch(): Promise<void> {
         image,
         viewport: { width: selectedDisplay.width, height: selectedDisplay.height, memoryMiB: selectedMemoryMiB },
         acpiExperimental: enableAcpiExperimental,
+        virtualDiskGiB: image.format === "cdrom" ? selectedVirtualDiskGiB : undefined,
         persistState: false,
       },
       liveMount,
@@ -300,6 +305,11 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLSelectElement>("#display-select")?.addEventListener("change", (event) => {
     selectedDisplayId = (event.currentTarget as HTMLSelectElement).value as DisplayPresetId;
+    persistRecovery();
+    render();
+  });
+  document.querySelector<HTMLSelectElement>("#virtual-disk-select")?.addEventListener("change", (event) => {
+    selectedVirtualDiskGiB = Number((event.currentTarget as HTMLSelectElement).value) as VirtualDiskGiB;
     persistRecovery();
     render();
   });

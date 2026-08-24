@@ -2,10 +2,12 @@
  * JustGo Local Engine design: this bridge starts an actual v86 x86 runtime
  * inside the visitor's browser. It never labels a legacy image as Windows 10.
  */
-import { V86, type V86Image } from "v86";
+import { V86 } from "../vendor/v86-sparse.mjs";
 import wasmUrl from "v86/build/v86.wasm?url";
 import type { LocalLaunchRequest, RuntimeBridge } from "./contracts";
 import { configureInputSurface, type InputProfile } from "./input-control";
+import { SparseGuestDisk } from "./sparse-guest-disk";
+import { IndexedDbSparseChunkStore, sparseDiskIdentity } from "./sparse-disk-storage";
 
 const V86_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/seabios.bin";
 const V86_VGA_BIOS_URL = "https://raw.githubusercontent.com/copy/v86/master/bios/vgabios.bin";
@@ -51,9 +53,17 @@ export class V86LocalRuntime implements RuntimeBridge {
     const image = requireBootableImage(request);
     const screen = prepareScreen(mount, request.viewport.width, request.viewport.height);
     this.inputProfile = configureInputSurface(screen);
-    const media: V86Image = image.localFile
-      ? ({ buffer: image.localFile, async: true } as unknown as V86Image)
+    const media = image.localFile
+      ? ({ buffer: image.localFile, async: true } as const)
       : { url: image.imageUrl! };
+    const virtualDisk = image.format === "cdrom" && request.virtualDiskGiB
+      ? ({
+          buffer: new SparseGuestDisk(request.virtualDiskGiB, {
+            diskId: sparseDiskIdentity(image.id, image.localFile, request.virtualDiskGiB),
+            store: new IndexedDbSparseChunkStore(),
+          }),
+        } as const)
+      : undefined;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -70,7 +80,7 @@ export class V86LocalRuntime implements RuntimeBridge {
         bios: { url: V86_BIOS_URL },
         vga_bios: { url: V86_VGA_BIOS_URL },
         acpi: request.acpiExperimental,
-        ...(image.format === "cdrom" ? { cdrom: media } : { hda: media }),
+        ...(image.format === "cdrom" ? { cdrom: media, ...(virtualDisk ? { hda: virtualDisk } : {}) } : { hda: media }),
         screen: {
           container: screen,
           use_graphical_text: true,

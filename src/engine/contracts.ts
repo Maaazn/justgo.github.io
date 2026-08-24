@@ -39,6 +39,8 @@ export interface LocalLaunchRequest {
   viewport: ViewportSpec;
   /** v86 ACPI is experimental but required by some NT-family boot managers. */
   acpiExperimental: boolean;
+  /** Sparse ATA target exposed to an installer booted from a local CD-ROM image. */
+  virtualDiskGiB?: 20 | 32 | 48 | 64;
   persistState: boolean;
 }
 

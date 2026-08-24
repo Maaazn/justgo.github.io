@@ -1,6 +1,7 @@
 /** Browser-only recovery for settings and an explicitly cached local boot medium. */
 import type { DisplayPresetId } from "./display-presets";
 import type { GuestMemoryMiB } from "./memory-policy";
+import type { VirtualDiskGiB } from "./sparse-guest-disk";
 
 const SETTINGS_KEY = "justgo.session-recovery.v1";
 const DATABASE = "justgo-local-recovery";
@@ -12,6 +13,7 @@ export interface RecoverableSessionSettings {
   localFormat: "hard-disk" | "cdrom";
   memoryMiB: GuestMemoryMiB;
   displayId: DisplayPresetId;
+  virtualDiskGiB: VirtualDiskGiB;
   acpiExperimental: boolean;
   retainLocalMedium: boolean;
 }
@@ -25,7 +27,7 @@ export function decodeRecoverySettings(value: string | null): RecoverableSession
   try {
     const parsed = JSON.parse(value) as Partial<RecoverableSessionSettings>;
     if (typeof parsed.imageId !== "string" || (parsed.localFormat !== "hard-disk" && parsed.localFormat !== "cdrom")) return undefined;
-    if (typeof parsed.memoryMiB !== "number" || typeof parsed.displayId !== "string" || typeof parsed.acpiExperimental !== "boolean" || typeof parsed.retainLocalMedium !== "boolean") return undefined;
+    if (typeof parsed.memoryMiB !== "number" || typeof parsed.displayId !== "string" || ![20, 32, 48, 64].includes(parsed.virtualDiskGiB ?? 0) || typeof parsed.acpiExperimental !== "boolean" || typeof parsed.retainLocalMedium !== "boolean") return undefined;
     return parsed as RecoverableSessionSettings;
   } catch {
     return undefined;
