@@ -16,6 +16,8 @@
 | ATA إلى IDT | اكتمال prefetch يولّد IRQ14 إلى PIC ثم بوابة Core-64 IDT | اختبارات sector جاهز وفشل prefetch وLBA محدد |
 | replay | trace + PS/2 payload + snapshot سجلات وذاكرة مراقبة | يقارن العنوان الأول المختلف، ولا يصوّر RAM كاملاً |
 
+إكمال `Blob/File` غير متزامن بطبيعته: مرحلة التخزين لا تحجب CPU ولا تعرّض DRQ قبل جاهزية القطاع، لكن tick الذي تصبح فيه Promise جاهزة يتأثر بجدولة المضيف. تسجل المنصة ذلك كحد جهاز في trace؛ **لا** يدّعي المحرك بعد أن إعادة تشغيل الوسيط المحلي ستفرض completion على tick مضيف مماثل. أما fixtures الاختبار المتحكم بها فتثبت الترتيب `storage → PIC → IDT` بصورة حتمية.
+
 ## ما يثبته corpus الموحد
 
 ينفذ corpus مصغر NOP ثم IRETQ ضمن PML4. يسجل scheduler دفعة لوحة مفاتيح PS/2، ويولد PIT IRQ0، ثم RTC IRQ8، ويمرر المتجهات عبر PIC إلى IDT. يعيد الاختبار استخراج دفعة PS/2 من trace، ويحقنها ثانية في scheduler، ثم يقارن trace والسجلات وbytes الذاكرة المراقبة. كما يثبت مسار divergence بأن تعطيل زمن RTC يغيّر trace وحالة `RIP` بدلاً من إخفاء الفرق.
@@ -28,6 +30,7 @@
 | CPU | decoder وتعليمات ونماذج fault محدودة؛ لا توافق مع نواة أو محمل إقلاع عام |
 | الذاكرة | لا large pages ولا NX ولا نموذج paging معماري كامل |
 | التخزين | لا DMA أو AHCI أو partition/FS/boot chain؛ ATA لا يحمّل Blob كاملاً ولا يرفعه |
+| حتمية I/O المحلي | لا توجد بعد بوابة replay تفرض وقت completion لوعود `Blob/File`؛ تتطلب التكرارية بين تشغيلين وسيطاً متحكماً أو trace-device gate لاحقاً |
 | firmware والأجهزة | لا BIOS/UEFI كامل، ولا USB guest controller، ولا نموذج VGA registers كامل |
 | التوافق | لا دليل على إقلاع Windows أو Linux؛ لا تُضمَّن وسائط أنظمة أو مفاتيح أو صور مرخّصة |
 
